@@ -135,6 +135,10 @@ def save_midi_from_df(df, output_path, ticks_per_beat=480):
         # Create a new track for each unique (track_num, name, channel) combination
         track = mido.MidiTrack()
         
+        # Convert to native Python types to ensure mido compatibility
+        chan = int(chan)
+        track_num = int(track_num)
+        
         # Set track name - append channel info if there are multiple channels for this track name
         # Check if this track name has multiple channels
         track_channels = df[df['track name'] == name]['channel'].unique()
@@ -158,6 +162,7 @@ def save_midi_from_df(df, output_path, ticks_per_beat=480):
             offset_ticks = int((row['onset in quarter notes'] + row['duration in quarter notes']) * ticks_per_beat)
             pitch = int(row['pitch'])
             velocity = int(row['velocity'])
+            chan = int(chan)  # Ensure channel is integer for mido
             # Note on
             events.append((onset_ticks, mido.Message('note_on', note=pitch, velocity=velocity, channel=chan)))
             # Note off

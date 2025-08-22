@@ -41,8 +41,8 @@ def midi_to_dataframe(midi_filename):
 
     for i, track in enumerate(mid.tracks):
         cur_time = 0
-        # For tracking active notes on each channel
-        active_notes = {}  # (channel, note) -> [onset_time, velocity]
+        # For tracking active notes on each channel - now supports multiple overlapping notes
+        active_notes = {}  # (channel, note) -> list of [onset_time, velocity]
 
         for msg in track:
             cur_time += msg.time
@@ -56,12 +56,17 @@ def midi_to_dataframe(midi_filename):
                 program_changes[(i, getattr(msg, 'channel', 0))] = msg.program
             # Note On
             elif msg.type == 'note_on' and msg.velocity > 0:
-                active_notes[(msg.channel, msg.note)] = [cur_time, msg.velocity]
+                k = (msg.channel, msg.note)
+                if k not in active_notes:
+                    active_notes[k] = []
+                # Add this note to the list of active notes
+                active_notes[k].append([cur_time, msg.velocity])
             # Note Off or Note On with velocity 0
             elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
                 k = (msg.channel, msg.note)
-                if k in active_notes:
-                    onset, velocity = active_notes.pop(k)
+                if k in active_notes and active_notes[k]:
+                    # Remove the oldest note (FIFO - first note on, first note off)
+                    onset, velocity = active_notes[k].pop(0)
                     duration = cur_time - onset
                     notes.append({
                         "track number": i,
@@ -74,6 +79,9 @@ def midi_to_dataframe(midi_filename):
                         "pitch": msg.note,
                         "velocity": velocity
                     })
+                    # Clean up empty lists
+                    if not active_notes[k]:
+                        del active_notes[k]
     # Prepare the dataframe
     df = pd.DataFrame(notes)
     # Fallback: if 'instrument name' is not present or empty, use track number
@@ -121,15 +129,25 @@ def save_midi_from_df(df, output_path, ticks_per_beat=480):
     - ticks_per_beat: int, MIDI resolution (default 480).
     """
     mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
-    tracks = {}
 
-    for (track_num, name), notes in df.groupby(['track number', 'track name']):
-        # Create a new track
+    # Group by track number, track name, and channel to preserve multi-instrument tracks
+    for (track_num, name, chan), notes in df.groupby(['track number', 'track name', 'channel']):
+        # Create a new track for each unique (track_num, name, channel) combination
         track = mido.MidiTrack()
-        # Set track name
-        track.append(mido.MetaMessage('track_name', name=name, time=0))
-        # Set program (instrument), assume all notes in this track use same channel and program
-        chan = int(notes['channel'].iloc[0])
+        
+        # Set track name - append channel info if there are multiple channels for this track name
+        # Check if this track name has multiple channels
+        track_channels = df[df['track name'] == name]['channel'].unique()
+        if len(track_channels) > 1:
+            # Multiple channels for this track name - append channel number
+            track_name = f"{name} (Ch {chan})"
+        else:
+            # Single channel - use original track name
+            track_name = name
+            
+        track.append(mido.MetaMessage('track_name', name=track_name, time=0))
+        
+        # Set program (instrument)
         prog = int(notes['program'].iloc[0])
         track.append(mido.Message('program_change', program=prog, channel=chan, time=0))
 

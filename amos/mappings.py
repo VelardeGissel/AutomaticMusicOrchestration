@@ -37,16 +37,21 @@ def learn_quaterna_mapping(nmat,ytarget="track-channel"):
     """
     if ytarget=="program":
         """
-        When target is program
-        Learns the mapping from label in column 3 to columns 0, 1, 2.
-        Returns a dictionary: label_val -> [col0, col1, col2]
+        Enhanced to preserve ALL track-channel combinations for each program.
+        Returns a dictionary: label_val -> list of [col0, col1, col2]
         """
         mapping = {}
         for row in nmat:
-            label = row[3]
-            # Only keep the last if duplications appear (can add check for consistency)
-            mapping[label] = row[:3].tolist()
-        #return mapping
+            label = row[3]  # program number
+            track_info = row[:3].tolist()  # [track_num, track_name, channel]
+            
+            if label not in mapping:
+                mapping[label] = []
+            
+            # Only add if this specific combination isn't already present
+            if track_info not in mapping[label]:
+                mapping[label].append(track_info)
+        return mapping
     else:
         """
         When target is track-channel
@@ -106,20 +111,41 @@ def fill_quaterna_columns(y, map_array, ytarget="track-channel"):
         Prompt by Gissel Velarde
         Prompt:
         the first 4 columns of a an numpy array with 8 columns always appear in quaterna. Write a function that learns the quaterna, given that column 3 is used as a label for a machine learning model. Then, once the model predicts the label for column 4, fill the corresponding values for columns 0, 1 and 2.
+        
+        Revised by GPT-5 mini.
         """
         """
         Given a list/array of predicted labels, use the mapping to reconstruct cols 0, 1, 2.
+        For programs with multiple instruments, distributes notes in round-robin fashion.
         Returns an array of shape (N, 3) where N is the number of predicted labels.
         """
         filled = []
+        # Keep track of which instrument to use next for each program (round-robin)
+        instrument_counters = {}
+        
         for label in y:
             if label in map_array:
-                filled.append(map_array[label])
+                available_instruments = map_array[label]
+                
+                if len(available_instruments) == 1:
+                    # Single instrument - use it directly
+                    filled.append(available_instruments[0])
+                else:
+                    # Multiple instruments - distribute in round-robin fashion
+                    if label not in instrument_counters:
+                        instrument_counters[label] = 0
+                    
+                    # Select the next instrument in rotation
+                    selected_instrument = available_instruments[instrument_counters[label]]
+                    filled.append(selected_instrument)
+                    
+                    # Move to next instrument for this program
+                    instrument_counters[label] = (instrument_counters[label] + 1) % len(available_instruments)
             else:
                 # handle unknown labels (e.g., with np.nan)
                 filled.append([np.nan, np.nan, np.nan])
         nmat_L_list = np.concatenate((np.array(filled), y.reshape(-1, 1)), axis=1)
-        #return np.array(filled)
+        return nmat_L_list
     else:
         """
         Generates a NumPy array (nmat_L) from a list of strings (y) by mapping

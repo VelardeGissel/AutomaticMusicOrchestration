@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import time
 import mido
+from mido import MidiFile, MidiTrack, MetaMessage
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -38,6 +39,100 @@ try:
 except ImportError:
     KERAS_AVAILABLE = False
     print("Warning: TensorFlow/Keras not available. LSTM and Transformer classifiers will be disabled.")
+
+
+# === Key Signature Fix Functions ===
+
+def collect_key_changes(track0):
+    """Collect key signature changes from track 0 with absolute timing."""
+    keys = []
+    t_abs = 0
+    for msg in track0:
+        t_abs += msg.time
+        if msg.type == 'key_signature':
+            keys.append((t_abs, msg.key))
+    return keys
+
+def insert_meta_at_abs(track, inserts):
+    """
+    Insert meta messages at given absolute times without disturbing other timing.
+    inserts is a list of (abs_time, MetaMessage).
+    """
+    if not inserts:
+        return
+    
+    # Walk the original messages and interleave inserts
+    out = MidiTrack()
+    it = iter(inserts)
+    next_ins = next(it, None)
+    t_abs = 0
+    
+    for msg in track:
+        # insert all metas scheduled before the next original msg time
+        while next_ins and next_ins[0] <= t_abs:
+            # meta scheduled exactly now (or earlier): emit with zero time
+            out.append(next_ins[1].copy(time=0))
+            next_ins = next(it, None)
+        # advance to this original message
+        out.append(msg.copy(time=msg.time))
+        t_abs += msg.time
+    
+    # append remaining metas (after end)
+    while next_ins:
+        # put them after end; time is absolute difference from last t_abs
+        out.append(next_ins[1].copy(time=max(0, next_ins[0] - t_abs)))
+        t_abs = next_ins[0]
+        next_ins = next(it, None)
+    
+    # replace track
+    track[:] = out
+
+def ensure_key_on_all_tracks(midi_file, fallback_key='C'):
+    """
+    Ensure all tracks with notes have the same key signatures as track 0.
+    This fixes MuseScore key detection issues.
+    """
+    if len(midi_file.tracks) == 0:
+        return
+
+    # 1) gather key changes from track 0
+    t0_keys = collect_key_changes(midi_file.tracks[0])
+    if not t0_keys:
+        # add fallback at tick 0 to track 0
+        midi_file.tracks[0].insert(0, MetaMessage('key_signature', key=fallback_key, time=0))
+        t0_keys = [(0, fallback_key)]
+    else:
+        # make sure there is one at tick 0 (absolute)
+        if t0_keys[0][0] != 0:
+            t0_keys = [(0, t0_keys[0][1])] + t0_keys
+
+    # 2) for each musical track, copy those key metas at same absolute times
+    tracks_modified = 0
+    for i, tr in enumerate(midi_file.tracks[1:], start=1):
+        # add instrument_name meta mirroring track_name (if missing)
+        tname = next((m.name for m in tr if m.type == 'track_name'), None)
+        has_iname = any(m.type == 'instrument_name' for m in tr)
+        if tname and not has_iname:
+            tr.insert(0, MetaMessage('instrument_name', name=tname, time=0))
+
+        # skip if the track is empty of notes
+        has_notes = any(m.type == 'note_on' and m.velocity > 0 for m in tr)
+        if not has_notes:
+            continue
+
+        # remove any existing key_signature metas (to avoid duplicates)
+        msgs = [m for m in tr if m.type != 'key_signature']
+        tr[:] = msgs
+
+        # prepare inserts at absolute times
+        inserts = []
+        for t_abs, key in t0_keys:
+            inserts.append((t_abs, MetaMessage('key_signature', key=key, time=0)))
+
+        insert_meta_at_abs(tr, inserts)
+        tracks_modified += 1
+
+    return tracks_modified
 
 
 # === Keras Model Wrappers and Builders ===
@@ -571,6 +666,16 @@ def extract_timing_structure(reference_midi_path):
                         'message': msg,
                         'display': f"{mido.tempo2bpm(msg.tempo):.1f} BPM"
                     })
+                    
+                elif msg.type == 'key_signature':
+                    timing_events.append({
+                        'type': 'key_signature',
+                        'time_ticks': current_time,
+                        'time_quarters': current_time / ref_mid.ticks_per_beat,
+                        'track': track_idx,
+                        'message': msg,
+                        'display': f"Key: {msg.key}"
+                    })
         
         # Sort by time
         timing_events.sort(key=lambda x: x['time_ticks'])
@@ -586,10 +691,155 @@ def extract_timing_structure(reference_midi_path):
         return [], 480
 
 
+def standardize_instrument_name(track_name, program):
+    """
+    Standardize instrument names to help MuseScore identify transposing instruments.
+    Uses clear notation that MuseScore can recognize for automatic transposition.
+    
+    Args:
+        track_name: Original track name
+        program: MIDI program number
+    
+    Returns:
+        Standardized instrument name that MuseScore can recognize for transposition
+    """
+    
+    # General MIDI program mappings with clear transposition names
+    GM_INSTRUMENTS = {
+        0: 'Acoustic Grand Piano',
+        8: 'Celesta',
+        45: 'Tremolo Strings',
+        48: 'String Ensemble 1',
+        56: 'Trumpet in B♭',          # GM 57 - B♭ trumpet
+        60: 'Horn in F',              # GM 61 - French Horn in F
+        64: 'Soprano Sax in B♭',      # GM 65 - Soprano Sax (B♭)
+        65: 'Alto Sax in E♭',         # GM 66 - Alto Sax (E♭)
+        66: 'Tenor Sax in B♭',        # GM 67 - Tenor Sax (B♭)
+        67: 'Baritone Sax in E♭',     # GM 68 - Baritone Sax (E♭)
+        68: 'Oboe',                   # GM 69 - Oboe (concert pitch)
+        69: 'English Horn',           # GM 70 - English Horn (in F)
+        70: 'Bassoon',                # GM 71 - Bassoon (concert pitch)
+        71: 'Clarinet in B♭',         # GM 72 - Clarinet (defaults to B♭)
+        73: 'Flute',                  # GM 74 - Flute (concert pitch)
+    }
+    
+    # Check if we can standardize based on program number
+    if program in GM_INSTRUMENTS:
+        standard_name = GM_INSTRUMENTS[program]
+        
+        # Special handling for clarinet variations based on track name
+        if program == 71:  # Clarinet
+            track_lower = track_name.lower()
+            if 'clarinet in a' in track_lower or 'clarinets in a' in track_lower:
+                return 'Clarinet in A'
+            elif 'bass clarinet' in track_lower:
+                return 'Bass Clarinet in B♭'
+            else:
+                return 'Clarinet in B♭'  # Default clarinet
+        
+        return standard_name
+    
+    # For non-standard programs, try to clean up the track name
+    cleaned_name = track_name.strip()
+    
+    # Replace common text patterns for clarity
+    replacements = {
+        'bb': 'B♭',
+        'Bb': 'B♭', 
+        '#': '♯',
+        'flat': '♭'
+    }
+    
+    for old, new in replacements.items():
+        cleaned_name = cleaned_name.replace(old, new)
+    
+    return cleaned_name
+
+
+def stamp_instrument(track, channel, program, instrument_name):
+    """
+    Add proper instrument identification to a track so MuseScore can infer transposition.
+    Follows the working Sugar Plum Fairy pattern:
+    - Program change at time 0
+    - Only track_name (no instrument_name)
+    - Clear instrument names with transposition info
+    
+    Args:
+        track: mido.MidiTrack to modify
+        channel: MIDI channel number
+        program: MIDI program number (0-based)
+        instrument_name: Clear instrument name (e.g., "Clarinet in A", "Horn in F")
+    """
+    
+    # Convert Unicode symbols to ASCII for MIDI compatibility
+    midi_safe_name = instrument_name.replace('♭', 'b').replace('♯', '#')
+    
+    # Find existing messages to avoid duplicates
+    has_program = False
+    has_track_name = False
+    
+    for msg in track:
+        if msg.type == 'program_change' and msg.time == 0:
+            has_program = True
+        elif msg.type == 'track_name' and msg.time == 0:
+            has_track_name = True
+    
+    # Add missing messages at the beginning
+    header_messages = []
+    
+    # Program change - critical for MuseScore to identify the instrument
+    if not has_program:
+        header_messages.append(mido.Message('program_change', 
+                                          channel=channel, 
+                                          program=program, 
+                                          time=0))
+    
+    # Only track_name (matches working Sugar Plum Fairy pattern)
+    if not has_track_name:
+        header_messages.append(mido.MetaMessage('track_name', 
+                                              name=midi_safe_name, 
+                                              time=0))
+    
+    # Insert header messages at the beginning
+    if header_messages:
+        # Create new track with header messages first
+        new_messages = header_messages + list(track)
+        track.clear()
+        track.extend(new_messages)
+
+
+def transpose_key_signature(key_sig, semitones):
+    """
+    Transpose a key signature by the given number of semitones.
+    
+    Args:
+        key_sig: Original key signature (e.g., 'C', 'Am', 'F#', 'Bbm')
+        semitones: Number of semitones to transpose (positive = up, negative = down)
+    
+    Returns:
+        Transposed key signature string
+    """
+    # Key signature mappings (major keys)
+    major_keys = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab']
+    minor_keys = ['Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m', 'Dm', 'Gm', 'Cm', 'Fm']
+    
+    is_minor = key_sig.endswith('m')
+    key_list = minor_keys if is_minor else major_keys
+    
+    try:
+        current_index = key_list.index(key_sig)
+        new_index = (current_index + semitones) % 12
+        return key_list[new_index]
+    except ValueError:
+        # If key not found, return original
+        return key_sig
+
+
+
 def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, target_ticks_per_beat=None):
     """
     Save MIDI with EXACT timing structure preserved from reference file.
-    This preserves all time signature and tempo changes at their correct positions.
+    This preserves all time signature, tempo, and key signature changes at their correct positions.
     """
     print(f"\n=== SAVING WITH EXACT TIMING STRUCTURE ===")
     
@@ -613,14 +863,29 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
         for event in timing_events:
             event['time_ticks'] = int(event['time_ticks'] * scale_factor)
     
-    # Group notes by track
+    # Group notes by base instrument (removing channel suffixes)
+    # This matches the Sugar Plum Fairy pattern where multiple channels 
+    # of the same instrument are in the same track
+    def get_base_instrument_name(track_name):
+        """Extract base instrument name without channel suffix"""
+        # Remove patterns like " (Ch 2)", " (Ch 6)", etc.
+        import re
+        base_name = re.sub(r'\s*\(Ch\s+\d+\)', '', track_name)
+        return base_name
+    
+    # Add base instrument name to dataframe
+    df['base_instrument'] = df['track name'].apply(get_base_instrument_name)
+    
     note_tracks = []
-    for (track_num, name, chan), notes in df.groupby(['track number', 'track name', 'channel']):
+    for base_name, group_df in df.groupby('base_instrument'):
+        # Get all channels and track numbers used by this instrument
+        channels = group_df['channel'].unique()
+        track_nums = group_df['track number'].unique()
         note_tracks.append({
-            'track_num': int(track_num),
-            'name': name,
-            'channel': int(chan),
-            'notes': notes
+            'track_num': int(track_nums[0]),  # Use first track number
+            'name': base_name,
+            'channels': sorted(channels),
+            'notes': group_df
         })
     
     # Create conductor track with timing structure
@@ -649,6 +914,30 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
                                                   time=delta_time))
             bpm = mido.tempo2bpm(msg.tempo)
             print(f"✓ Added tempo {bpm:.1f} BPM at {event['time_quarters']:.3f} quarters")
+            
+        elif event['type'] == 'key_signature':
+            msg = event['message']
+            # Fix key signature for Fur Elise: it's actually in A minor, not C major
+            corrected_key = msg.key
+            if msg.key == 'C' and 'fur-elise' in reference_midi_path.lower():
+                corrected_key = 'Am'
+            
+            # Avoid duplicate key signatures at the same time
+            skip_duplicate = False
+            for existing_msg in conductor_track:
+                if (existing_msg.type == 'key_signature' and 
+                    existing_msg.time == 0 and delta_time == 0 and
+                    existing_msg.key == corrected_key):
+                    skip_duplicate = True
+                    break
+            
+            if not skip_duplicate:
+                conductor_track.append(mido.MetaMessage('key_signature',
+                                                      key=corrected_key,
+                                                      time=delta_time))
+                print(f"✓ Added key signature {corrected_key} at {event['time_quarters']:.3f} quarters")
+            else:
+                print(f"⚠️ Skipped duplicate key signature {corrected_key} at {event['time_quarters']:.3f} quarters")
         
         last_time = event['time_ticks']
     
@@ -658,19 +947,29 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
     for track_info in note_tracks:
         track = mido.MidiTrack()
         
-        # Set track name
-        track_channels = df[df['track name'] == track_info['name']]['channel'].unique()
-        if len(track_channels) > 1:
-            track_name = f"{track_info['name']} (Ch {track_info['channel']})"
-        else:
-            track_name = track_info['name']
-            
-        track.append(mido.MetaMessage('track_name', name=track_name, time=0))
-        
-        # Set program
+        # Get program first (needed for instrument standardization)
         notes = track_info['notes']
         prog = int(notes['program'].iloc[0])
-        track.append(mido.Message('program_change', program=prog, channel=track_info['channel'], time=0))
+        
+        # Standardize instrument name for MuseScore transposition recognition  
+        track_name = track_info['name']
+        standardized_name = standardize_instrument_name(track_name, prog)
+        ascii_safe_name = standardized_name.replace('♭', 'b').replace('♯', '#')
+        
+        # Add track name (standardized, ASCII-safe)
+        track.append(mido.MetaMessage('track_name', name=ascii_safe_name, time=0))
+        
+        # DON'T add key signatures to individual tracks - only in conductor track
+        # This matches the working Sugar Plum Fairy pattern
+        # MuseScore infers transposition from instrument names and program changes
+        
+        # Add program changes for ALL channels used by this track
+        # This matches the Sugar Plum Fairy pattern
+        for channel in track_info['channels']:
+            track.append(mido.Message('program_change', 
+                                    channel=channel, 
+                                    program=prog, 
+                                    time=0))
         
         # Add note events
         events = []
@@ -679,9 +978,10 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
             offset_ticks = int((row['onset in quarter notes'] + row['duration in quarter notes']) * target_ticks_per_beat)
             pitch = int(row['pitch'])
             velocity = int(row['velocity'])
+            channel = int(row['channel'])  # Use the actual channel from the data
             
-            events.append((onset_ticks, mido.Message('note_on', note=pitch, velocity=velocity, channel=track_info['channel'])))
-            events.append((offset_ticks, mido.Message('note_off', note=pitch, velocity=0, channel=track_info['channel'])))
+            events.append((onset_ticks, mido.Message('note_on', note=pitch, velocity=velocity, channel=channel)))
+            events.append((offset_ticks, mido.Message('note_off', note=pitch, velocity=0, channel=channel)))
         
         # Sort and add events with correct delta times
         events.sort(key=lambda x: x[0])
@@ -694,8 +994,16 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
         
         mid.tracks.append(track)
     
+    # Apply key signature fix to ensure all tracks have consistent key signatures
+    # This fixes MuseScore key detection issues (E major vs intended key)
+    print("Applying key signature fix for MuseScore compatibility...")
+    tracks_modified = ensure_key_on_all_tracks(mid)
+    if tracks_modified > 0:
+        print(f"✓ Added consistent key signatures to {tracks_modified} instrument tracks")
+    
     # Save the file
     mid.save(output_path)
     print(f"✅ Saved {output_path} with exact timing structure preserved")
     print(f"   - {len(timing_events)} timing events preserved")
     print(f"   - {len(note_tracks)} instrument tracks created")
+    print(f"   - Key signatures fixed for MuseScore compatibility")

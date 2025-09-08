@@ -8,6 +8,7 @@ asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_17331756
 astunparse==1.6.3
 async-lru @ file:///home/conda/feedstock_root/build_artifacts/async-lru_1690563019058/work
 attrs @ file:///home/conda/feedstock_root/build_artifacts/attrs_1722977137225/work
+audioread==3.0.1
 babel @ file:///home/conda/feedstock_root/build_artifacts/babel_1730878832677/work
 backcall @ file:///home/conda/feedstock_root/build_artifacts/backcall_1592338393461/work
 beautifulsoup4 @ file:///home/conda/feedstock_root/build_artifacts/beautifulsoup4_1705564648255/work
@@ -17,6 +18,7 @@ cached-property @ file:///home/conda/feedstock_root/build_artifacts/cached_prope
 cachetools==5.5.2
 certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1725278078093/work/certifi
 cffi @ file:///Users/runner/miniforge3/conda-bld/cffi_1723018415758/work
+chardet @ file:///Users/runner/miniforge3/conda-bld/chardet_1695468689393/work
 charset-normalizer==3.4.2
 comm @ file:///home/conda/feedstock_root/build_artifacts/comm_1710320294760/work
 contourpy @ file:///Users/runner/miniforge3/conda-bld/contourpy_1695554217566/work
@@ -51,13 +53,14 @@ importlib_metadata @ file:///home/conda/feedstock_root/build_artifacts/importlib
 importlib_resources @ file:///home/conda/feedstock_root/build_artifacts/importlib_resources_1725921340658/work
 iniconfig==2.0.0
 ipykernel @ file:///Users/runner/miniforge3/conda-bld/ipykernel_1719845458456/work
-ipython @ file:///Users/runner/miniforge3/conda-bld/ipython_1683289207929/work
+ipython==7.34.0
 ipywidgets @ file:///home/conda/feedstock_root/build_artifacts/ipywidgets_1724334859652/work
 isoduration @ file:///home/conda/feedstock_root/build_artifacts/isoduration_1638811571363/work/dist
 jedi @ file:///home/conda/feedstock_root/build_artifacts/jedi_1696326070614/work
 Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/jinja2_1715127149914/work
 joblib @ file:///home/conda/feedstock_root/build_artifacts/joblib_1714665484399/work
 json5 @ file:///home/conda/feedstock_root/build_artifacts/json5_1712986206667/work
+jsonpickle @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jsonpickle_1731426283/work
 jsonpointer @ file:///Users/runner/miniforge3/conda-bld/jsonpointer_1718283394629/work
 jsonschema @ file:///home/conda/feedstock_root/build_artifacts/jsonschema_1720529478715/work
 jsonschema-specifications @ file:///tmp/tmpvslgxhz5/src
@@ -75,14 +78,21 @@ jupyterlab_server @ file:///home/conda/feedstock_root/build_artifacts/jupyterlab
 jupyterlab_widgets @ file:///home/conda/feedstock_root/build_artifacts/jupyterlab_widgets_1724331334887/work
 keras==2.13.1
 kiwisolver @ file:///Users/runner/miniforge3/conda-bld/kiwisolver_1695380066007/work
+lazy_loader==0.4
 libclang==18.1.1
+libfmp==1.2.6
+librosa==0.11.0
+llvmlite==0.41.1
 Markdown==3.7
 MarkupSafe @ file:///Users/runner/miniforge3/conda-bld/markupsafe_1706899993502/work
 matplotlib @ file:///Users/runner/miniforge3/conda-bld/matplotlib-suite_1695076736962/work
 matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1713250518406/work
 mido @ file:///home/conda/feedstock_root/build_artifacts/mido_1628891227174/work
 mistune @ file:///home/conda/feedstock_root/build_artifacts/mistune_1698947099619/work
+more-itertools @ file:///home/conda/feedstock_root/build_artifacts/more-itertools_1725630081114/work
+msgpack==1.1.1
 munkres==1.1.4
+music21==5.7.2
 nbclient @ file:///home/conda/feedstock_root/build_artifacts/nbclient_1734628800805/work
 nbconvert @ file:///home/conda/feedstock_root/build_artifacts/nbconvert-meta_1733405477194/work
 nbformat @ file:///home/conda/feedstock_root/build_artifacts/nbformat_1712238998817/work
@@ -90,6 +100,7 @@ nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_17
 networkx==3.4rc0
 notebook==7.3.3
 notebook_shim @ file:///home/conda/feedstock_root/build_artifacts/notebook-shim_1707957777232/work
+numba==0.58.1
 numpy @ file:///Users/runner/miniforge3/conda-bld/numpy_1660672952235/work
 oauthlib==3.2.2
 opt_einsum==3.4.0
@@ -107,6 +118,7 @@ platformdirs @ file:///home/conda/feedstock_root/build_artifacts/platformdirs_17
 pluggy==1.5.0
 ply==3.11
 pooch @ file:///home/conda/feedstock_root/build_artifacts/pooch_1717777836653/work
+pretty-midi==0.2.10
 prometheus_client @ file:///home/conda/feedstock_root/build_artifacts/prometheus_client_1726901976720/work
 prompt_toolkit @ file:///home/conda/feedstock_root/build_artifacts/prompt-toolkit_1727341649933/work
 protobuf==4.25.8
@@ -137,7 +149,9 @@ scipy @ file:///Users/runner/miniforge3/conda-bld/scipy-split_1683900453702/work
 Send2Trash @ file:///home/conda/feedstock_root/build_artifacts/send2trash_1628511208346/work
 six @ file:///home/conda/feedstock_root/build_artifacts/six_1620240208055/work
 sniffio @ file:///home/conda/feedstock_root/build_artifacts/sniffio_1708952932303/work
+soundfile==0.13.1
 soupsieve @ file:///home/conda/feedstock_root/build_artifacts/soupsieve_1746562223429/work
+soxr==0.3.7
 stack-data @ file:///home/conda/feedstock_root/build_artifacts/stack_data_1669632077133/work
 tensorboard==2.13.0
 tensorboard-data-server==0.7.2

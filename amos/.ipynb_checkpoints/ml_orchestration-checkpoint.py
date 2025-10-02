@@ -23,7 +23,11 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.tree import DecisionTreeClassifier
-
+#2.10.2025
+import os
+import joblib
+from datetime import datetime
+#2.10.2025
 # Import from local modules
 from midi2df2midi import midi_to_dataframe, save_midi_from_df
 from mappings import fill_quaterna_columns, learn_quaterna_mapping
@@ -1008,7 +1012,7 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
     print(f"   - {len(note_tracks)} instrument tracks created")
     print(f"   - Key signatures fixed for MuseScore compatibility")
 
-def amo(filein, fileout, ytarget="track-channel", model="XGBoost"):
+def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path=""):
     """
     GV with Gemini. 19.9.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
@@ -1134,3 +1138,99 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost"):
     
     # Use the exact timing preservation function
     save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
+    #
+    # Save all needed artifacts
+    if pipeline_path!="": 
+        artifact = {
+            "pipeline": clf_pipeline,                 # pipeline
+            "label_encoder": le_f,           # label encoder for final training
+            "mapping": mapping,              # quaterna reconstruction mapping
+            "ytarget": ytarget,              # 'track-channel' or 'program'
+            }
+
+        joblib.dump(artifact, pipeline_path)
+        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+    #
+
+def amo_load_and_orchestrate(
+    pipeline_path: str,
+    target_midi_path: str,
+    output_midi_path: str = None
+) -> str:
+    """
+    Load a saved XGBoost AMO pipeline and orchestrate a new MIDI file.
+
+    Parameters
+    ----------
+    pipeline_path : str
+        Path to the saved pipeline artifact (.joblib) from `amo_save_pipeline_xgb`.
+    target_midi_path : str
+        Path to the target MIDI to orchestrate.
+    output_midi_path : str, optional
+        Path for the output MIDI. If None, a default name is formed.
+
+    Returns
+    -------
+    str
+        Path to the saved orchestrated MIDI file.
+    """
+    if not os.path.exists(pipeline_path):
+        raise FileNotFoundError(f"Pipeline not found: {pipeline_path}")
+
+    print(f"[AMO-XGB LOAD] Loading pipeline: {pipeline_path}")
+    artifact = joblib.load(pipeline_path)
+    clf_pipeline = artifact["pipeline"]
+    le_f = artifact["label_encoder"]
+    mapping = artifact["mapping"]
+    ytarget = artifact["ytarget"]
+
+
+    # Load and sort target MIDI events
+    print(f"[AMO-XGB LOAD] Orchestrating target MIDI: {target_midi_path}")
+    dfnmat2 = midi_to_dataframe(target_midi_path)
+    dfnmat2 = dfnmat2.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat2 = dfnmat2.to_numpy()
+    # X2: (onset, duration, pitch, velocity)
+    X2 = nmat2[:, 4:8]
+
+    print("[AMO-XGB LOAD] Target events:", X2.shape[0], "; last onset:", X2[-1, 0])
+    try:
+        mid = mido.MidiFile(target_midi_path)
+        print(f"[AMO-XGB LOAD] ticks_per_beat (ref): {mid.ticks_per_beat}")
+    except Exception as ex:
+        print(f"[AMO-XGB LOAD] Could not read ticks_per_beat: {ex}")
+
+    # Predict orchestration and reconstruct quaterna
+    data = clf_predict(X2, le_f, clf_pipeline, mapping, ytarget)
+    
+    # Build DataFrame with standard schema
+    dfdata = pd.DataFrame(data, columns=[
+        'track number', 'track name', 'channel', 'program',
+        'onset in quarter notes', 'duration in quarter notes', 'pitch', 'velocity'
+    ])
+
+    # Enforce dtypes
+    dfdata['track number'] = dfdata['track number'].astype(int)
+    dfdata['channel'] = dfdata['channel'].astype(int)
+    dfdata['program'] = dfdata['program'].astype(int)
+    dfdata['pitch'] = dfdata['pitch'].astype(int)
+    dfdata['velocity'] = dfdata['velocity'].astype(int)
+    dfdata['onset in quarter notes'] = dfdata['onset in quarter notes'].astype(float)
+    dfdata['duration in quarter notes'] = dfdata['duration in quarter notes'].astype(float)
+    dfdata['track name'] = dfdata['track name'].astype(str)
+
+    # Output MIDI path
+    if output_midi_path is None:
+        output_midi_path = target_midi_path.replace(".mid", f"_orchestrated.mid")
+
+    print(f"[AMO-XGB LOAD] Saving orchestrated MIDI to: {output_midi_path}")
+    save_midi_with_exact_timing_structure(
+        dfdata,
+        output_midi_path,
+        reference_midi_path=target_midi_path
+    )
+
+    return output_midi_path

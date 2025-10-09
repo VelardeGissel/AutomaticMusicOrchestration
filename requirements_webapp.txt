@@ -1,0 +1,16 @@
+# AMO Web Application Requirements
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# File handling
+aiofiles==23.2.1
+
+# Already installed dependencies (from existing environment)
+# numpy
+# pandas
+# scikit-learn
+# xgboost
+# mido
+# joblib

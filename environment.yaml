@@ -246,3 +246,7 @@ dependencies:
       - tensorflow==2.16.2
       - tensorflow-macos==2.16.2
       - tensorflow-metal==1.2.0
+      # Web application dependencies
+      - fastapi==0.104.1
+      - uvicorn[standard]==0.24.0
+      - python-multipart==0.0.6

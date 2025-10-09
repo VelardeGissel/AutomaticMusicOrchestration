@@ -1158,16 +1158,22 @@ def amo_load_and_orchestrate(
     output_midi_path: str = None
 ) -> str:
     """
-    Load a saved XGBoost AMO pipeline and orchestrate a new MIDI file.
+    Load a saved AMO pipeline and orchestrate a new MIDI file.
+    
+    Automatically extracts style and model type from pipeline filename 
+    (format: {style}_{model_type}.joblib) and includes them in the output filename.
 
     Parameters
     ----------
     pipeline_path : str
-        Path to the saved pipeline artifact (.joblib) from `amo_save_pipeline_xgb`.
+        Path to the saved pipeline artifact (.joblib).
+        Expected format: weights/{style}_{model_type}.joblib
+        Example: weights/beethoven_xgboost.joblib
     target_midi_path : str
         Path to the target MIDI to orchestrate.
     output_midi_path : str, optional
-        Path for the output MIDI. If None, a default name is formed.
+        Path for the output MIDI. If None, generates name with format:
+        {original_name}_{style}_{model_type}_orchestrated.mid
 
     Returns
     -------
@@ -1177,7 +1183,23 @@ def amo_load_and_orchestrate(
     if not os.path.exists(pipeline_path):
         raise FileNotFoundError(f"Pipeline not found: {pipeline_path}")
 
-    print(f"[AMO-XGB LOAD] Loading pipeline: {pipeline_path}")
+    # Extract style and model_type from pipeline filename
+    # Expected format: weights/{style}_{model_type}.joblib
+    import re
+    pipeline_filename = os.path.basename(pipeline_path)
+    match = re.match(r'(\w+)_(\w+)\.joblib$', pipeline_filename)
+    
+    if match:
+        style = match.group(1)
+        model_type = match.group(2)
+        print(f"[AMO LOAD] Detected style: {style}, model: {model_type}")
+    else:
+        # Fallback for old naming convention (e.g., beethoven.joblib)
+        style = pipeline_filename.replace('.joblib', '')
+        model_type = 'unknown'
+        print(f"[AMO LOAD] Legacy format detected, style: {style}")
+
+    print(f"[AMO LOAD] Loading pipeline: {pipeline_path}")
     artifact = joblib.load(pipeline_path)
     clf_pipeline = artifact["pipeline"]
     le_f = artifact["label_encoder"]
@@ -1186,7 +1208,7 @@ def amo_load_and_orchestrate(
 
 
     # Load and sort target MIDI events
-    print(f"[AMO-XGB LOAD] Orchestrating target MIDI: {target_midi_path}")
+    print(f"[AMO LOAD] Orchestrating target MIDI: {target_midi_path}")
     dfnmat2 = midi_to_dataframe(target_midi_path)
     dfnmat2 = dfnmat2.sort_values(
         ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -1196,12 +1218,12 @@ def amo_load_and_orchestrate(
     # X2: (onset, duration, pitch, velocity)
     X2 = nmat2[:, 4:8]
 
-    print("[AMO-XGB LOAD] Target events:", X2.shape[0], "; last onset:", X2[-1, 0])
+    print("[AMO LOAD] Target events:", X2.shape[0], "; last onset:", X2[-1, 0])
     try:
         mid = mido.MidiFile(target_midi_path)
-        print(f"[AMO-XGB LOAD] ticks_per_beat (ref): {mid.ticks_per_beat}")
+        print(f"[AMO LOAD] ticks_per_beat (ref): {mid.ticks_per_beat}")
     except Exception as ex:
-        print(f"[AMO-XGB LOAD] Could not read ticks_per_beat: {ex}")
+        print(f"[AMO LOAD] Could not read ticks_per_beat: {ex}")
 
     # Predict orchestration and reconstruct quaterna
     data = clf_predict(X2, le_f, clf_pipeline, mapping, ytarget)
@@ -1222,11 +1244,12 @@ def amo_load_and_orchestrate(
     dfdata['duration in quarter notes'] = dfdata['duration in quarter notes'].astype(float)
     dfdata['track name'] = dfdata['track name'].astype(str)
 
-    # Output MIDI path
+    # Output MIDI path with style and model_type in filename
     if output_midi_path is None:
-        output_midi_path = target_midi_path.replace(".mid", f"_orchestrated.mid")
+        # Generate filename: {original_name}_{style}_{model_type}_orchestrated.mid
+        output_midi_path = target_midi_path.replace(".mid", f"_{style}_{model_type}_orchestrated.mid")
 
-    print(f"[AMO-XGB LOAD] Saving orchestrated MIDI to: {output_midi_path}")
+    print(f"[AMO LOAD] Saving orchestrated MIDI to: {output_midi_path}")
     save_midi_with_exact_timing_structure(
         dfdata,
         output_midi_path,

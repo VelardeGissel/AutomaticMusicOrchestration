@@ -31,6 +31,11 @@ from datetime import datetime
 # Import from local modules
 from midi2df2midi import midi_to_dataframe, save_midi_from_df
 from mappings import fill_quaterna_columns, learn_quaterna_mapping
+#23.10.2025
+from collections import defaultdict
+#05.11.2025
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.preprocessing import MultiLabelBinarizer
 
 # Keras/TensorFlow imports for neural networks
 try:
@@ -1011,6 +1016,823 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
     print(f"   - {len(timing_events)} timing events preserved")
     print(f"   - {len(note_tracks)} instrument tracks created")
     print(f"   - Key signatures fixed for MuseScore compatibility")
+
+def reduce_df_with_transform(df, tol=1.0, transformations=None):
+    df_reduced = df
+    df_hashed = defaultdict(list)
+    count_match = {
+        'transformed': 0,
+        'direct': 0,
+        'none': 0
+    }
+    df_reduced["doubled"] = 0
+    for func, kwargs in transformations:
+        df_reduced[f"{func.__name__}_{kwargs}"] = 0
+
+    todrop = []
+
+    for idx, note in df_reduced.iterrows():
+        key = (note['onset in quarter notes'], note['pitch'])        
+
+        matched = False
+        for candidate_match_index in df_hashed[key]:
+            candidate_match = df_reduced.loc[candidate_match_index]
+            dur_diff = abs(candidate_match['duration in quarter notes'] - note['duration in quarter notes'])
+            if dur_diff <= note['duration in quarter notes'] * tol:
+                df_reduced.at[candidate_match_index, "doubled"] += 1
+                matched = True
+                count_match['direct'] += 1
+                todrop.append(idx)
+                break
+
+        if transformations and not matched:
+            for func, kwargs in transformations:
+                if not matched:
+                    transformed = func(note, **kwargs)
+                    for t in transformed:
+                        key_t = (t['onset in quarter notes'], t['pitch'])
+                        if len(df_hashed[key_t]) > 0: # if something matches with the transformation
+                            for candidate_match_index in df_hashed[key_t]:
+                                candidate_match = df_reduced.loc[candidate_match_index]
+                                dur_diff = abs(candidate_match['duration in quarter notes'] - note['duration in quarter notes'])
+                                if dur_diff <= note['duration in quarter notes'] * tol:
+                                    df_reduced.at[candidate_match_index, f"{func.__name__}_{kwargs}"] += 1
+                                    matched = True
+                                    count_match['transformed'] += 1
+                                    todrop.append(idx)
+                                    break
+
+        if not matched:
+            df_hashed[key].append(idx)
+            count_match['none'] += 1
+
+    print(count_match)
+    print(f"Original size: {df_reduced.shape}")
+    print(f"Dropping {todrop}")
+    df_reduced.drop(todrop, inplace=True)
+    print(f"Size after drop: {df_reduced.shape}")
+
+    return df_reduced
+
+def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoost", pipeline_path=""):
+    """
+    FM
+    """
+    
+    # Define available classifiers and their names
+    classifiers_map = {
+        "XGBoost": XGBClassifier(),
+        "RandomForest": RandomForestClassifier(),
+        "DecisionTree": DecisionTreeClassifier(),
+        "NearestNeighbors": KNeighborsClassifier(1),
+        "MLP3": MLPClassifier(hidden_layer_sizes=(128, 128, 128)),
+        "NaiveBayes": GaussianNB(),
+        "MLP1": MLPClassifier(),
+        "AdaBoost": AdaBoostClassifier(),
+    }
+    
+    if KERAS_AVAILABLE:
+        classifiers_map["LSTMClassifier"] = KerasClassifierWrapper(build_lstm_classifier)
+        classifiers_map["TransformerClassifier"] = KerasClassifierWrapper(build_transformer_classifier)
+
+    # Check if the requested model is available
+    if model not in classifiers_map:
+        if "LSTMClassifier" in model or "TransformerClassifier" in model:
+            print(f"Error: Keras is not available. Cannot use {model}.")
+            return
+        else:
+            print(f"Error: Invalid model name '{model}'. Available models are: {list(classifiers_map.keys())}")
+            return
+            
+    clf_name = model
+    clf = classifiers_map[clf_name]
+
+    # Load and process source file
+    #print(f"Learning {ytarget}")
+    df = df.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat = df.to_numpy()
+    mapping = learn_quaterna_mapping(nmat, ytarget)
+    #print("Mapping:", mapping)
+    
+    X, _ = defineXy(nmat, ytarget)
+    y = df[ytarget].to_numpy()
+    print("Labels", np.unique(y))
+    print("Number of events:", X.shape[0])
+    print("Last onset at", X[X.shape[0] - 1, 0])
+
+    if len(np.unique(y)) == 1:
+        print("Only one label in target variable")
+        return
+    
+    # Partition the dataset
+    X_train, X_test, y_train, y_test, le = split_and_encode(X, y, test_size=0.2, random_state=42)
+    X_train_f, _, y_train_f, _, le_f = split_and_encode(X, y, test_size=0, random_state=42)
+    
+    # Train and predict with the specified classifier
+    print(f"\n--------- {clf_name} ---------")
+    start = time.time()
+    
+    if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
+        clf_pipeline = make_pipeline(StandardScaler(), clf)
+    else:
+        clf_pipeline = clf
+        
+    clf_pipeline.fit(X_train, y_train)
+    score = clf_pipeline.score(X_test, y_test) # This is accuracy (?)
+    # TODO: Here and everywhere, use more scoring functions (prec, rec, f1, acc)
+    end = time.time()
+    
+    print("Train Time (sec):", f"{end - start:.4f}")
+    print("Score on Test Set (20% split):", f"{score:.4f}")
+    #
+    # Save all needed artifacts
+    if pipeline_path!="": 
+        artifact = {
+            "pipeline": clf_pipeline,                 # pipeline
+            "label_encoder": le_f,           # label encoder for final training
+            "mapping": mapping,              # quaterna reconstruction mapping
+            "ytarget": ytarget,              # 
+            }
+
+        joblib.dump(artifact, pipeline_path)
+        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+    #
+
+import joblib
+import numpy as np
+
+def predict_with_trained_model(df_target, pipeline_path):
+    """
+    Applies the trained model (saved by estimate_transform) to a target dataframe.
+    Returns predictions and probability estimates (if supported).
+    """
+    # Load trained artifacts
+    artifact = joblib.load(pipeline_path)
+    clf_pipeline = artifact["pipeline"]
+    le = artifact["label_encoder"]
+    mapping = artifact["mapping"]
+    ytarget = artifact["ytarget"]
+    
+    # Preprocess target dataframe
+    df_target = df_target.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat_target = df_target.to_numpy()
+    
+    # Use the same feature definition function as in training
+    X_target, _ = defineXy(nmat_target, ytarget)
+    
+    # Predict
+    print(f"\n[AMO-PREDICT] Predicting {ytarget} on target dataframe...")
+    y_pred = clf_pipeline.predict(X_target)
+    
+    # Optionally get probabilities if available
+    try:
+        y_prob = clf_pipeline.predict_proba(X_target)
+    except AttributeError:
+        y_prob = None
+    
+    # Decode labels back to original form if label encoder available
+    if le is not None:
+        try:
+            y_pred_decoded = le.inverse_transform(y_pred)
+        except Exception:
+            y_pred_decoded = y_pred
+    else:
+        y_pred_decoded = y_pred
+    
+    # Add to dataframe for convenience
+    df_target_pred = df_target.copy()
+    df_target_pred[f"{ytarget}"] = y_pred_decoded
+    
+    print(f"[AMO-PREDICT] Done. {len(y_pred)} predictions generated.")
+    
+    return df_target_pred, y_pred_decoded, y_prob
+
+def expand_estimated_transform(df, transformations=None):
+    """
+    Expands a reduced dataframe by recreating rows that were removed 
+    due to direct duplicates or transformations in `reduce_df_with_transform`.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The reduced dataframe returned by reduce_df_with_transform.
+    transformations : list of tuples, optional
+        List of (func, kwargs) transformation specifications.
+        Each func must accept and return a dict representing a note.
+
+    Returns
+    -------
+    pd.DataFrame
+        Expanded dataframe including the recreated duplicated and transformed rows.
+    """
+    expanded_rows = []
+
+    # iterate through all remaining notes
+    for idx, row in df.iterrows():
+        note_dict = row.to_dict()
+        expanded_rows.append(note_dict)  # always keep original
+
+        # Handle doublings (even without transformations)
+        if "doubled" in df.columns and row["doubled"] > 0:
+            for _ in range(int(row["doubled"])):
+                expanded_rows.append(note_dict.copy())
+
+        # Handle transformations if available
+        if transformations:
+            for func, kwargs in transformations:
+                col_name = f"{func.__name__}_{kwargs}"
+                if col_name in df.columns and row[col_name] > 0:
+                    for _ in range(int(row[col_name])):
+                        # Apply the inverse transformation
+                        try:
+                            transformed_notes = func(row, inverse=True, **kwargs)
+                        except TypeError as err:
+                            raise TypeError(f"Function {func.__name__} is not invertible! {err}")
+
+                        # func returns a list of transformed notes
+                        for t in transformed_notes:
+                            expanded_rows.append(t)
+
+    # Rebuild dataframe
+    df_expanded = pd.DataFrame(expanded_rows).reset_index(drop=True)
+    return df_expanded
+
+def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None):
+    """
+    GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025
+    Automated Music Orchestration function that orchestrates a target MIDI file
+    using a single specified machine learning model and preserves musical structure.
+    Modified to support multi-class instrument prediction with multi-hot encoding.
+
+    Args:
+        filein (str): Path to the source MIDI file to learn orchestration style from.
+        fileout (str): Path to the target MIDI file to be orchestrated.
+        ytarget (str, optional): The target variable for the model ('track-channel' or 'program').
+                                 Defaults to "track-channel".
+        model (str, optional): The name of the machine learning model to use for orchestration.
+                               Defaults to "XGBoost".
+        tol: Tolerance for note matching
+        transformations: List of transformations to apply
+    """
+    
+    # Define available classifiers and their names
+    classifiers_map = {
+        "XGBoost": XGBClassifier(),
+        "RandomForest": RandomForestClassifier(),
+        "DecisionTree": DecisionTreeClassifier(),
+        "NearestNeighbors": KNeighborsClassifier(1),
+        "MLP3": MLPClassifier(hidden_layer_sizes=(128, 128, 128)),
+        "NaiveBayes": GaussianNB(),
+        "MLP1": MLPClassifier(),
+        "AdaBoost": AdaBoostClassifier(),
+    }
+    
+    if KERAS_AVAILABLE:
+        classifiers_map["LSTMClassifier"] = KerasClassifierWrapper(build_lstm_classifier)
+        classifiers_map["TransformerClassifier"] = KerasClassifierWrapper(build_transformer_classifier)
+
+    # Check if the requested model is available
+    if model not in classifiers_map:
+        if "LSTMClassifier" in model or "TransformerClassifier" in model:
+            print(f"Error: Keras is not available. Cannot use {model}.")
+            return
+        else:
+            print(f"Error: Invalid model name '{model}'. Available models are: {list(classifiers_map.keys())}")
+            return
+            
+    clf_name = model
+    clf = classifiers_map[clf_name]
+
+    # Load and process source file
+    print(f"Learning orchestration style from: {filein}")
+    dfnmat = midi_to_dataframe(filein)
+    dfnmat = dfnmat.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat = dfnmat.to_numpy()
+    # Get mapping from the grouped data
+    mapping = learn_quaterna_mapping(nmat, ytarget)
+    print("Mapping:", mapping)
+
+    # Build dfreduced
+    print("Building reduced dataset")
+    dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    
+    # ===== MULTI-CLASS MODIFICATION START =====
+    # Group notes by (onset, duration, pitch) within tolerance to create multi-hot labels
+    print("Creating multi-hot encoding for overlapping instruments...")
+    X, y_multihot, all_classes, mlb = defineXy_multihot(nmat, ytarget)
+    print("Number of classes:", len(all_classes))
+    print("Classes:", all_classes)
+    print("Number of events in", filein, ":", X.shape[0])
+    print("Last onset at", X[X.shape[0] - 1, 0])
+    print(y_multihot)
+    # ===== MULTI-CLASS MODIFICATION END =====
+    
+    # Load and process target file
+    print(f"\nProcessing target file: {fileout}")
+    dfnmat2 = midi_to_dataframe(fileout)
+    dfnmat2 = dfnmat2.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat2 = dfnmat2.to_numpy()
+    X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
+    print("Number of events in", fileout, ":", X2.shape[0])
+    print("Last onset at", X2[X2.shape[0] - 1, 0])
+    
+    # Get original ticks_per_beat for precise timing
+    try:
+        original_midi = mido.MidiFile(fileout)
+        original_ticks_per_beat = original_midi.ticks_per_beat
+        print(f"Original ticks_per_beat: {original_ticks_per_beat}")
+    except:
+        original_ticks_per_beat = 480
+    
+    # ===== MULTI-CLASS MODIFICATION START =====
+    # Use MultiOutputClassifier for multi-hot prediction
+    
+    # Partition the dataset
+    X_train, X_test, y_train, y_test = train_test_split(X, y_multihot, test_size=0.2, random_state=42)
+    
+    # For full training, use all data (no split needed)
+    X_train_f = X
+    y_train_f = y_multihot
+    
+    # Wrap classifier for multi-output
+    print(f"\n--------- {clf_name} (Multi-Output) ---------")
+    start = time.time()
+    
+    if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
+        base_clf = make_pipeline(StandardScaler(), clf)
+    else:
+        base_clf = clf
+    
+    clf_pipeline = MultiOutputClassifier(base_clf)
+    clf_pipeline.fit(X_train, y_train)
+    
+    # Calculate score (average across all outputs)
+    score = clf_pipeline.score(X_test, y_test)
+    end = time.time()
+    
+    print("Train Time (sec):", f"{end - start:.4f}")
+    print("Score on Test (20%):", f"{score:.4f}")
+    # ===== MULTI-CLASS MODIFICATION END =====
+
+    # Predict expansions
+    # ===== MULTI-CLASS MODIFICATION START =====
+    #yexptarget = f"doubled"
+    #print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+    #estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+    #dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+    # ===== MULTI-CLASS MODIFICATION END =====
+    for func, kwargs in transformations:
+        yexptarget = f"{func.__name__}_{kwargs}"
+        print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+        estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+        try:
+            dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+            print("\n")
+        except:
+            print(f"No prediction for {yexptarget}: setting to 0")
+            dfnmat2[yexptarget] = 0
+
+    print(dfnmat2)
+    dfnmat2 = expand_estimated_transform(dfnmat2, transformations=transformations)
+    dfnmat2 = dfnmat2.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat2 = dfnmat2.to_numpy()
+    X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
+    print("Number of events in", fileout, ":", X2.shape[0])
+    print("Last onset at", X2[X2.shape[0] - 1, 0])
+    
+    # ===== MULTI-CLASS MODIFICATION START =====
+    # Predict orchestration with multi-hot output
+    clf_pipeline.fit(X_train_f, y_train_f)
+    data = multihot_clf_predict(X2, mlb, clf_pipeline, mapping, ytarget)
+    #y_pred_multihot = clf_pipeline.predict(X2)
+    
+    # Convert multi-hot predictions back to multiple rows per note
+    #data = multihot_to_rows(X2, y_pred_multihot, all_classes, mapping, ytarget)
+    # ===== MULTI-CLASS MODIFICATION END =====
+    
+    # Convert to DataFrame
+    dfdata = pd.DataFrame(data, columns=[
+        'track number', 'track name', 'channel', 'program',
+        'onset in quarter notes', 'duration in quarter notes', 'pitch', 'velocity'
+    ])
+    
+    # Fix data types
+    dfdata['track number'] = dfdata['track number'].astype(int)
+    dfdata['channel'] = dfdata['channel'].astype(int)
+    dfdata['program'] = dfdata['program'].astype(int)
+    dfdata['pitch'] = dfdata['pitch'].astype(int)
+    dfdata['velocity'] = dfdata['velocity'].astype(int)
+    dfdata['onset in quarter notes'] = dfdata['onset in quarter notes'].astype(float)
+    dfdata['duration in quarter notes'] = dfdata['duration in quarter notes'].astype(float)
+    dfdata['track name'] = dfdata['track name'].astype(str)
+    
+    # Save with preserved musical structure
+    extensions = f"{clf_name}_WITH_TIMING_WITH_DOUBLINGS_MULTIHOT.mid"
+    filename = fileout.replace(".mid", extensions)
+    print('Orchestration with preserved structure:', filename)
+    
+    # Use the exact timing preservation function
+    save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
+    
+    # Save all needed artifacts
+    if pipeline_path!="": 
+        artifact = {
+            "pipeline": clf_pipeline,
+            "all_classes": all_classes,      # Store class list for multi-hot
+            "mapping": mapping,
+            "ytarget": ytarget,
+        }
+        joblib.dump(artifact, pipeline_path)
+        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+
+
+# ===== HELPER FUNCTIONS FOR MULTI-HOT ENCODING =====
+
+def defineXy_multihot(nmat, ytarget="track-channel"):
+    """
+    Extract features (X) and multi-hot labels (y_multihot) from a note matrix (nmat).
+    
+    This function reduces the note matrix based on (onset, pitch) key, similar to 
+    the doubling logic, and aggregates the ytarget labels for the reduced notes
+    to create multi-hot encoding.
+    
+    Args:
+        nmat (np.ndarray): The note matrix containing musical events.
+        ytarget (str): Defines the label type ("program" or "track-channel").
+        
+    Returns:
+        tuple: (X_reduced, y_multihot, all_classes)
+               X_reduced: NumPy array of reduced features (onset, duration, pitch, velocity).
+               y_multihot: NumPy array of multi-hot encoded labels.
+               all_classes: List of all unique instrument classes.
+    """
+    
+    # 1. Determine Initial Features (X) and Labels (y)
+    # The columns in nmat are typically: 
+    # [track_number, track_name_id, channel, program, onset, duration, pitch, velocity]
+    if ytarget == "program":
+        # y = program (index 3)
+        X = nmat[:, 4:8]  # onset, duration, pitch, velocity (indices 4-7)
+        y = nmat[:, 3].astype(str)
+    else: # ytarget == "track-channel"
+        # y = track_channel (indices 0 and 2)
+        X = nmat[:, 4:8]  # onset, duration, pitch, velocity
+        A = nmat[:, 0].astype(str)
+        B = nmat[:, 2].astype(str)
+        y = np.char.add(np.char.add(A, '_'), B)  # Label is "track_channel"
+    
+    
+    # 2. Simulate Reduction/Doubling to Generate Multi-Hot Targets
+    
+    # Use a DataFrame for convenient indexing and attribute access, mirroring the original function.
+    # Note: We are NOT dropping rows here; we are mapping multiple indices to a single index.
+    df = pd.DataFrame(X, columns=['onset', 'duration', 'pitch', 'velocity'])
+    df['y_label'] = y
+    df['original_index'] = df.index
+    
+    # Maps (onset, pitch) -> [list of original indices]
+    # We'll use this to find the *first* instance of a note for reduction.
+    df_hashed = defaultdict(list)
+    
+    # Maps reduced_index -> [list of all original y_labels]
+    multi_hot_map = defaultdict(list)
+    
+    # List to store the features of the notes that survive the reduction (the "seed" notes)
+    X_reduced_list = []
+    
+    # We will use a simple reduction: notes with the same (onset, pitch) map to the 
+    # first one encountered, regardless of duration difference (tol is not used here 
+    # to keep it simple, mirroring a common reduction strategy for multi-instrument scores).
+    
+    for idx, note in df.iterrows():
+        key = (note['onset'], note['pitch'])
+        label = note['y_label']
+        
+        # Check if this (onset, pitch) has been seen before (i.e., is a "doubling")
+        if len(df_hashed[key]) > 0:
+            # This is a doubling. The 'candidate_match_index' is the index of the reduced note.
+            reduced_index = df_hashed[key][0] 
+            
+            # Aggregate the label to the reduced note
+            multi_hot_map[reduced_index].append(label)
+        else:
+            # This is the first time we see this (onset, pitch) combination (the "seed" note)
+            # Add its index to the hash map
+            df_hashed[key].append(idx)
+            
+            # The original index is now the reduced index
+            reduced_index = idx
+            
+            # Add its features to the reduced list
+            X_reduced_list.append(note[['onset', 'duration', 'pitch', 'velocity']].values)
+            
+            # Add its label to the multi-hot map
+            multi_hot_map[reduced_index].append(label)
+
+    # Convert reduced features back to a NumPy array
+    X_reduced = np.array(X_reduced_list)
+    
+    # 3. Multi-Hot Encoding
+    
+    # Extract the aggregated labels in the order of X_reduced
+    # We iterate over the original indices that became the 'seed' notes (first element in df_hashed lists)
+    y_aggregated = []
+    
+    # To maintain order, we need to extract the labels from multi_hot_map 
+    # based on the order of indices used to build X_reduced_list.
+    # We can rely on the fact that the indices in df_hashed[key][0] correspond to the order 
+    # in which X_reduced_list was built.
+    
+    # The indices in X_reduced_list are the same as the original df.index, just non-contiguous.
+    # We must preserve the order of X_reduced_list:
+    
+    reduced_indices = [idx for key in df_hashed for idx in df_hashed[key][:1]]
+    
+    # We need to ensure the order of labels corresponds to the order in X_reduced_list
+    # The indices in df_hashed[key][0] are ordered by the first time they were encountered, 
+    # which is the order in which they were added to X_reduced_list.
+    
+    y_aggregated = [
+        multi_hot_map[idx] 
+        for idx, note_features in zip(reduced_indices, X_reduced_list)
+    ]
+    
+    # Instantiate the encoder
+    mlb = MultiLabelBinarizer()
+    
+    # Fit on all unique labels found in the entire dataset
+    all_classes = sorted(list(set(y)))
+    mlb.fit([all_classes]) # Fit with a list containing a list of all classes
+    
+    # Transform the aggregated labels
+    y_multihot = mlb.transform(y_aggregated)
+
+    return X_reduced, y_multihot, all_classes, mlb
+
+
+def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
+    """
+    Predict orchestration using a multi-hot trained model, then convert 
+    the multi-hot predictions into duplicated rows, and map labels to MIDI columns.
+
+    Args:
+        X2 (np.ndarray): Input features (onset, duration, pitch, velocity).
+        mlb (MultiLabelBinarizer): The fitted binarizer used during training.
+        model (object): The fitted multi-hot classification model (e.g., XGBoost with multi-output).
+        mapping (list or dict): The structure mapping labels to track/channel/program info.
+        ytarget (str): Defines the label type ("program" or "track-channel").
+        
+    Returns:
+        np.ndarray: A final note matrix (nmat) with duplicated rows and full columns.
+    """
+    
+    # 1. Multi-hot Prediction
+    # This result is a binary array (N_samples x N_classes)
+    y_pred_multihot = model.predict(X2)
+    print("Multi-hot Predictions shape:", y_pred_multihot.shape)
+    
+    # 2. Inverse Transform to obtain original multi-labels (List of Lists/Sets)
+    # y_pred_labels is a list where each element is a list of predicted labels for that note.
+    # e.g., [['1_1', '1_2'], ['2_4'], ...]
+    y_pred_labels = mlb.inverse_transform(y_pred_multihot)
+    
+    # 3. Flatten predictions and duplicate X2 rows
+    
+    # Store the final expanded rows of features and labels
+    X_expanded = []
+    y_expanded = []
+    
+    # Iterate through the original feature rows (X2) and their multi-label predictions
+    for x_row, labels in zip(X2, y_pred_labels):
+        # Handle case where no label is predicted (empty set/list)
+        if len(labels) == 0:
+            # Optionally use a default class or skip the row. Using default class (first class).
+            labels = [mlb.classes_[0]] 
+        
+        # Duplicate the feature row for every predicted label
+        count_rows_with_mult = 0
+        for label in labels:
+            y_expanded.append(label)
+            X_expanded.append(x_row)
+            count_rows_with_mult += 1
+        count_rows_with_mult -= 1
+
+    print(f"Number of doubled notes: {count_rows_with_mult}")
+
+            
+    # Convert lists back to NumPy arrays
+    X_expanded_arr = np.array(X_expanded)
+    y_expanded_arr = np.array(y_expanded)
+
+    print(f"Original unique labels predicted: {np.unique(y_expanded_arr)}")
+    
+    # 4. Map expanded labels to MIDI columns (using external helper)
+    # This step is preserved from the original clf_predict
+    # NOTE: The implementation of fill_quaterna_columns is crucial here.
+    try:
+        new_cols = fill_quaterna_columns(y_expanded_arr, mapping, ytarget)
+    except NameError:
+        print("Error: fill_quaterna_columns function is not defined. Cannot map labels to MIDI columns.")
+        return None
+    except Exception as e:
+        print(f"Error during fill_quaterna_columns: {e}")
+        return None
+        
+    # 5. Concatenate and return the final note matrix
+    # Format: [track_number, track_name, channel, program, onset, duration, pitch, velocity]
+    nmat_expanded = np.concatenate((new_cols, X_expanded_arr), axis=1)
+    
+    return nmat_expanded
+
+def amo_with_doublings(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None):
+    """
+    GV with Gemini. 19.9.2025 + FM 23.10.2025
+    Automated Music Orchestration function that orchestrates a target MIDI file
+    using a single specified machine learning model and preserves musical structure.
+
+    Args:
+        filein (str): Path to the source MIDI file to learn orchestration style from.
+        fileout (str): Path to the target MIDI file to be orchestrated.
+        ytarget (str, optional): The target variable for the model ('track-channel' or 'program').
+                                 Defaults to "track-channel".
+        model (str, optional): The name of the machine learning model to use for orchestration.
+                               Defaults to "XGBoost".
+        tol
+        transformation
+    """
+    
+    # Define available classifiers and their names
+    classifiers_map = {
+        "XGBoost": XGBClassifier(),
+        "RandomForest": RandomForestClassifier(),
+        "DecisionTree": DecisionTreeClassifier(),
+        "NearestNeighbors": KNeighborsClassifier(1),
+        "MLP3": MLPClassifier(hidden_layer_sizes=(128, 128, 128)),
+        "NaiveBayes": GaussianNB(),
+        "MLP1": MLPClassifier(),
+        "AdaBoost": AdaBoostClassifier(),
+    }
+    
+    if KERAS_AVAILABLE:
+        classifiers_map["LSTMClassifier"] = KerasClassifierWrapper(build_lstm_classifier)
+        classifiers_map["TransformerClassifier"] = KerasClassifierWrapper(build_transformer_classifier)
+
+    # Check if the requested model is available
+    if model not in classifiers_map:
+        if "LSTMClassifier" in model or "TransformerClassifier" in model:
+            print(f"Error: Keras is not available. Cannot use {model}.")
+            return
+        else:
+            print(f"Error: Invalid model name '{model}'. Available models are: {list(classifiers_map.keys())}")
+            return
+            
+    clf_name = model
+    clf = classifiers_map[clf_name]
+
+    # Load and process source file
+    print(f"Learning orchestration style from: {filein}")
+    dfnmat = midi_to_dataframe(filein)
+    dfnmat = dfnmat.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat = dfnmat.to_numpy()
+    mapping = learn_quaterna_mapping(nmat, ytarget)
+    print("Mapping:", mapping)
+
+    # Build dfreduced
+    print("Building reduced dataset")
+    dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    
+    X, y = defineXy(nmat, ytarget)
+    print("Labels", np.unique(y))
+    print("Number of events in", filein, ":", X.shape[0])
+    print("Last onset at", X[X.shape[0] - 1, 0])
+    
+    # Load and process target file
+    print(f"\nProcessing target file: {fileout}")
+    dfnmat2 = midi_to_dataframe(fileout)
+    dfnmat2 = dfnmat2.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat2 = dfnmat2.to_numpy()
+    X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
+    print("Number of events in", fileout, ":", X2.shape[0])
+    print("Last onset at", X2[X2.shape[0] - 1, 0])
+    
+    # Get original ticks_per_beat for precise timing
+    try:
+        original_midi = mido.MidiFile(fileout)
+        original_ticks_per_beat = original_midi.ticks_per_beat
+        print(f"Original ticks_per_beat: {original_ticks_per_beat}")
+    except:
+        original_ticks_per_beat = 480
+    
+    # Partition the dataset
+    X_train, X_test, y_train, y_test, le = split_and_encode(X, y, test_size=0.2, random_state=42)
+    X_train_f, _, y_train_f, _, le_f = split_and_encode(X, y, test_size=0, random_state=42)
+    
+    # Train and predict with the specified classifier
+    print(f"\n--------- {clf_name} ---------")
+    start = time.time()
+    
+    if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
+        clf_pipeline = make_pipeline(StandardScaler(), clf)
+    else:
+        clf_pipeline = clf
+        
+    clf_pipeline.fit(X_train, y_train)
+    score = clf_pipeline.score(X_test, y_test)
+    end = time.time()
+    
+    print("Train Time (sec):", f"{end - start:.4f}")
+    print("Score on Test (20%):", f"{score:.4f}")
+
+    # Predict expansions TODO: Use one model for multi-variate target prediction
+    yexptarget = f"doubled"
+    #print(f"Learning {ytarget}")
+    print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+    estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+    dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+    for func, kwargs in transformations:
+        yexptarget = f"{func.__name__}_{kwargs}"
+        #print(f"Learning {ytarget}")
+        print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+        estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+        try:
+            dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+            print("\n")
+        except:
+            print(f"No prediction for {yexptarget}: setting to 0")
+            dfnmat2[yexptarget] = 0
+
+    print(dfnmat2)
+    dfnmat2 = expand_estimated_transform(dfnmat2, transformations=transformations)
+    dfnmat2 = dfnmat2.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat2 = dfnmat2.to_numpy()
+    X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
+    print("Number of events in", fileout, ":", X2.shape[0])
+    print("Last onset at", X2[X2.shape[0] - 1, 0])
+    
+    # Predict orchestration
+    clf_pipeline.fit(X_train_f, y_train_f)
+    data = clf_predict(X2, le_f, clf_pipeline, mapping, ytarget)
+    
+    # Convert to DataFrame
+    dfdata = pd.DataFrame(data, columns=[
+        'track number', 'track name', 'channel', 'program',
+        'onset in quarter notes', 'duration in quarter notes', 'pitch', 'velocity'
+    ])
+    
+    # Fix data types
+    dfdata['track number'] = dfdata['track number'].astype(int)
+    dfdata['channel'] = dfdata['channel'].astype(int)
+    dfdata['program'] = dfdata['program'].astype(int)
+    dfdata['pitch'] = dfdata['pitch'].astype(int)
+    dfdata['velocity'] = dfdata['velocity'].astype(int)
+    dfdata['onset in quarter notes'] = dfdata['onset in quarter notes'].astype(float)
+    dfdata['duration in quarter notes'] = dfdata['duration in quarter notes'].astype(float)
+    dfdata['track name'] = dfdata['track name'].astype(str)
+    
+    # Save with preserved musical structure
+    extensions = f"{clf_name}_WITH_TIMING_WITH_DOUBLINGS.mid"
+    filename = fileout.replace(".mid", extensions)
+    print('Orchestration with preserved structure:', filename)
+    
+    # Use the exact timing preservation function
+    save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
+    #
+    # Save all needed artifacts
+    if pipeline_path!="": 
+        artifact = {
+            "pipeline": clf_pipeline,                 # pipeline
+            "label_encoder": le_f,           # label encoder for final training
+            "mapping": mapping,              # quaterna reconstruction mapping
+            "ytarget": ytarget,              # 'track-channel' or 'program'
+            }
+
+        joblib.dump(artifact, pipeline_path)
+        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+    #
 
 def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path=""):
     """

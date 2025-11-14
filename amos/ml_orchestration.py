@@ -1334,6 +1334,8 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     print("Number of events in", filein, ":", X.shape[0])
     print("Last onset at", X[X.shape[0] - 1, 0])
     print(y_multihot)
+    print(np.sum(y_multihot,axis=1))
+    print(max(np.sum(y_multihot,axis=1)))
     # ===== MULTI-CLASS MODIFICATION END =====
     
     # Load and process target file
@@ -1605,6 +1607,7 @@ def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
     # This result is a binary array (N_samples x N_classes)
     y_pred_multihot = model.predict(X2)
     print("Multi-hot Predictions shape:", y_pred_multihot.shape)
+    #print(max(np.sum(y_pred_multihot, axis=1)))
     
     # 2. Inverse Transform to obtain original multi-labels (List of Lists/Sets)
     # y_pred_labels is a list where each element is a list of predicted labels for that note.
@@ -1618,6 +1621,7 @@ def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
     y_expanded = []
     
     # Iterate through the original feature rows (X2) and their multi-label predictions
+    count_rows_with_mult = 0
     for x_row, labels in zip(X2, y_pred_labels):
         # Handle case where no label is predicted (empty set/list)
         if len(labels) == 0:
@@ -1625,7 +1629,6 @@ def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
             labels = [mlb.classes_[0]] 
         
         # Duplicate the feature row for every predicted label
-        count_rows_with_mult = 0
         for label in labels:
             y_expanded.append(label)
             X_expanded.append(x_row)
@@ -1633,6 +1636,7 @@ def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
         count_rows_with_mult -= 1
 
     print(f"Number of doubled notes: {count_rows_with_mult}")
+    print("Expanded target lenght:", len(y_expanded))
 
             
     # Convert lists back to NumPy arrays

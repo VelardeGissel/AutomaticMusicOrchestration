@@ -1135,7 +1135,7 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     X_train_f, _, y_train_f, _, le_f = split_and_encode(X, y, test_size=0, random_state=42)
     
     # Train and predict with the specified classifier
-    print(f"\n--------- {clf_name} ---------")
+    print(f"--------- {clf_name} ---------")
     start = time.time()
     
     if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
@@ -1161,7 +1161,7 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
             }
 
         joblib.dump(artifact, pipeline_path)
-        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+        print(f"Pipeline saved: {pipeline_path}")
     #
 
 import joblib
@@ -1190,7 +1190,7 @@ def predict_with_trained_model(df_target, pipeline_path):
     X_target, _ = defineXy(nmat_target, ytarget)
     
     # Predict
-    print(f"\n[AMO-PREDICT] Predicting {ytarget} on target dataframe...")
+    print(f"Predicting {ytarget} on target dataframe...")
     y_pred = clf_pipeline.predict(X_target)
     
     # Optionally get probabilities if available
@@ -1212,7 +1212,7 @@ def predict_with_trained_model(df_target, pipeline_path):
     df_target_pred = df_target.copy()
     df_target_pred[f"{ytarget}"] = y_pred_decoded
     
-    print(f"[AMO-PREDICT] Done. {len(y_pred)} predictions generated.")
+    print(f"Prediction of transformation done. {len(y_pred)} predictions generated.")
     
     return df_target_pred, y_pred_decoded, y_prob
 
@@ -1314,6 +1314,7 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
 
     # Load and process source file
     print(f"Learning orchestration style from: {filein}")
+    print("\n========= PREPROCESSING =========")
     dfnmat = midi_to_dataframe(filein)
     dfnmat = dfnmat.sort_values(
         ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -1325,12 +1326,15 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     print("Mapping:", mapping)
 
     # Build dfreduced
-    print("Building reduced dataset")
-    dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    if transformations:
+        print("\nBuilding reduced dataset with transformations")
+        dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    else:
+        dfnmat_reduced = dfnmat
     
     # ===== MULTI-CLASS MODIFICATION START =====
     # Group notes by (onset, duration, pitch) within tolerance to create multi-hot labels
-    print("Creating multi-hot encoding for overlapping instruments...")
+    print("\nCreating multi-hot encoding for notes with instrumental doubling")
     X, y_multihot, all_classes, mlb = defineXy_multihot(nmat, ytarget)
     print("Number of classes:", len(all_classes))
     print("Classes:", all_classes)
@@ -1370,9 +1374,12 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     # For full training, use all data (no split needed)
     X_train_f = X
     y_train_f = y_multihot
+
+    print("\n========= TRAINING =========")
     
     # Wrap classifier for multi-output
-    print(f"\n--------- {clf_name} (Multi-Output) ---------")
+    print("\nInstrument classification")
+    print(f"--------- {clf_name} (Multi-Output) ---------")
     start = time.time()
     
     if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
@@ -1398,19 +1405,24 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     #estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
     #dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
     # ===== MULTI-CLASS MODIFICATION END =====
-    for func, kwargs in transformations:
-        yexptarget = f"{func.__name__}_{kwargs}"
-        print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
-        estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
-        try:
-            dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
-            print("\n")
-        except:
-            print(f"No prediction for {yexptarget}: setting to 0")
-            dfnmat2[yexptarget] = 0
+    if transformations:
+        print("\nTransformation classification (training on orchestral file, prediction for target piano file)")
+        for func, kwargs in transformations:
+            yexptarget = f"{func.__name__}_{kwargs}"
+            print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+            estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+            try:
+                dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+            except:
+                print(f"No prediction for {yexptarget}: setting to 0")
+                dfnmat2[yexptarget] = 0
 
-    print(dfnmat2)
-    dfnmat2 = expand_estimated_transform(dfnmat2, transformations=transformations)
+        dfnmat2 = expand_estimated_transform(dfnmat2, transformations=transformations)
+
+        print("\nSummary of target piano file after transformations")
+    else:
+        print("\nSummary of target piano file (no transformations)")
+    
     dfnmat2 = dfnmat2.sort_values(
         ['onset in quarter notes', 'duration in quarter notes', 'track number'],
         ascending=[True, True, True]
@@ -1419,6 +1431,8 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
     print("Number of events in", fileout, ":", X2.shape[0])
     print("Last onset at", X2[X2.shape[0] - 1, 0])
+
+    print("\n========= PREDICTION (target file) =========")
     
     # ===== MULTI-CLASS MODIFICATION START =====
     # Predict orchestration with multi-hot output
@@ -1429,6 +1443,8 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     # Convert multi-hot predictions back to multiple rows per note
     #data = multihot_to_rows(X2, y_pred_multihot, all_classes, mapping, ytarget)
     # ===== MULTI-CLASS MODIFICATION END =====
+
+    print("\n========= POSTPROCESSING AND SAVING =========")
     
     # Convert to DataFrame
     dfdata = pd.DataFrame(data, columns=[
@@ -1447,7 +1463,8 @@ def amo_with_doublings_multihot(filein, fileout, ytarget="track-channel", model=
     dfdata['track name'] = dfdata['track name'].astype(str)
     
     # Save with preserved musical structure
-    extensions = f"{clf_name}_WITH_TIMING_WITH_DOUBLINGS_MULTIHOT.mid"
+    transform_label = "_WITH_DOUBLINGS" if (transformations and len(transformations) > 0) else ""
+    extensions = f"{clf_name}_WITH_TIMING{transform_label}_MULTIHOT.mid"
     filename = fileout.replace(".mid", extensions)
     print('Orchestration with preserved structure:', filename)
     

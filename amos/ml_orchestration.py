@@ -720,8 +720,8 @@ def standardize_instrument_name(track_name, program):
     GM_INSTRUMENTS = {
         0: 'Acoustic Grand Piano',
         8: 'Celesta',
-        45: 'Tremolo Strings',
-        48: 'String Ensemble 1',
+        # 45: 'Tremolo Strings', # Keep the name of the track for these (FM)
+        # 48: 'String Ensemble 1', # Keep the name of the track for these (FM)
         56: 'Trumpet in B♭',          # GM 57 - B♭ trumpet
         60: 'Horn in F',              # GM 61 - French Horn in F
         64: 'Soprano Sax in B♭',      # GM 65 - Soprano Sax (B♭)

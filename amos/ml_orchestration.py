@@ -36,6 +36,8 @@ from collections import defaultdict
 #05.11.2025
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
+#28.11.2025
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
 # Keras/TensorFlow imports for neural networks
 try:
@@ -1145,11 +1147,31 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
         
     clf_pipeline.fit(X_train, y_train)
     score = clf_pipeline.score(X_test, y_test) # This is accuracy (?)
-    # TODO: Here and everywhere, use more scoring functions (prec, rec, f1, acc)
+    
+    # --- NEW LINES START HERE ---
+    # Get predictions for metric calculation
+    y_pred = clf_pipeline.predict(X_test)
+    
+    # Calculate additional metrics using 'weighted' average for multiclass data
+    # 'Weighted' accounts for class imbalance by weighting the scores by the number of true instances for each label.
+    precision, recall, f1, support = precision_recall_fscore_support(y_test, y_pred, average='weighted', zero_division=0)
+    # Calculate the Confusion Matrix for single-class
+    cm = confusion_matrix(y_test, y_pred)
+    # --- NEW LINES END HERE ---
+
     end = time.time()
     
     print("Train Time (sec):", f"{end - start:.4f}")
     print("Score on Test Set (20% split):", f"{score:.4f}")
+
+    # --- NEW LINES START HERE ---
+    print("Precision (weighted):", f"{precision:.4f}")
+    print("Recall (weighted):", f"{recall:.4f}")
+    print("F1-Score (weighted):", f"{f1:.4f}")
+    print("Support", support)
+
+    print("Confusion Matrix:\n", cm)
+    # --- NEW LINES END HERE ---
     #
     # Save all needed artifacts
     if pipeline_path!="": 
@@ -1215,6 +1237,19 @@ def predict_with_trained_model(df_target, pipeline_path):
     print(f"Prediction of transformation done. {len(y_pred)} predictions generated.")
     
     return df_target_pred, y_pred_decoded, y_prob
+
+def findInsName(mapping, class_name, ytarget):
+
+    if ytarget!='track-channel':
+        raise TypeError(f"{ytarget} unsupported as ytarget in findInsName")
+    
+    track, channel = class_name.split('_')
+    track, channel = int(track), int(channel)
+    for m in mapping:
+        if (track, channel) == (m[0], m[2]):
+            return m[1]
+
+    return 'not found'
 
 def expand_estimated_transform(df, transformations=None):
     """
@@ -1397,10 +1432,40 @@ def amo_with_doublings_multiclass(filein, fileout, ytarget="track-channel", mode
         
         # Calculate score (average across all outputs)
         score = clf_pipeline.score(X_test, y_test)
+
+        # --- NEW LINES START HERE ---
+        # Get predictions for metric calculation
+        y_pred = clf_pipeline.predict(X_test) 
+
+        # Calculate additional metrics using 'micro' average for multi-label data
+        # 'Micro' aggregates the contributions of all classes to compute the average metric.
+        precision, recall, f1, support = precision_recall_fscore_support(y_test, y_pred, average='micro', zero_division=0)
+        # --- NEW LINES END HERE ---
+
         end = time.time()
         
         print("Train Time (sec):", f"{end - start:.4f}")
         print("Score on Test (20%):", f"{score:.4f}")
+
+        # --- NEW LINES START HERE ---
+        print("Precision (micro):", f"{precision:.4f}")
+        print("Recall (micro):", f"{recall:.4f}")
+        print("F1-Score (micro):", f"{f1:.4f}")
+        print("Support", support)
+
+        print("Confusion Matrices for Individual Classes:")
+        # Loop through each output (instrument/class)
+        for i, class_name in enumerate(all_classes):
+            ins_name = findInsName(mapping, class_name, ytarget)
+            # Calculate CM for the i-th column (i-th class)
+            cm_i = confusion_matrix(y_test[:, i], y_pred[:, i])
+            print(f"--- Class: {class_name} {ins_name} ---")
+            print(cm_i)
+            # Example interpretation:
+            # [[TN, FP],
+            #  [FN, TP]]
+        # --- NEW LINES END HERE ---
+
     else:
         # Partition the dataset
         X_train, X_test, y_train, y_test, le = split_and_encode(X, y, test_size=0.2, random_state=42)
@@ -1420,10 +1485,31 @@ def amo_with_doublings_multiclass(filein, fileout, ytarget="track-channel", mode
             
         clf_pipeline.fit(X_train, y_train)
         score = clf_pipeline.score(X_test, y_test)
+
+        # --- NEW LINES START HERE ---
+        # Get predictions for metric calculation
+        y_pred = clf_pipeline.predict(X_test)
+        
+        # Calculate additional metrics using 'weighted' average for multiclass data
+        # 'Weighted' accounts for class imbalance by weighting the scores by the number of true instances for each label.
+        precision, recall, f1, support = precision_recall_fscore_support(y_test, y_pred, average='weighted', zero_division=0)
+        # Calculate the Confusion Matrix for single-class
+        cm = confusion_matrix(y_test, y_pred)
+        # --- NEW LINES END HERE ---
+
         end = time.time()
         
         print("Train Time (sec):", f"{end - start:.4f}")
         print("Score on Test (20%):", f"{score:.4f}")
+
+        # --- NEW LINES START HERE ---
+        print("Precision (weighted):", f"{precision:.4f}")
+        print("Recall (weighted):", f"{recall:.4f}")
+        print("F1-Score (weighted):", f"{f1:.4f}")
+        print("Support", support)
+
+        print("Confusion Matrix (True vs Predicted Instrument Index):\n", cm)
+        # --- NEW LINES END HERE ---
 
     if transformations: # TODO: Use one model for multi-variate target prediction
         print("\nTransformation classification (training on orchestral file, prediction for target piano file)")

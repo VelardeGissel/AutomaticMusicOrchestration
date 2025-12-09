@@ -1351,6 +1351,10 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
     # Define available classifiers and their names
     classifiers_map = {
         "XGBoost": XGBClassifier(),
+        "XGBoost5": XGBClassifier(n_estimators = 5),
+        "XGBoost10": XGBClassifier(n_estimators = 10),
+        "XGBoost20": XGBClassifier(n_estimators = 20),
+        "XGBoost50": XGBClassifier(n_estimators = 50),
         "RandomForest": RandomForestClassifier(),
         "DecisionTree": DecisionTreeClassifier(),
         "NearestNeighbors": KNeighborsClassifier(1),

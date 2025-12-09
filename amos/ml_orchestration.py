@@ -1386,74 +1386,27 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
     # Load and process source file
     print(f"Learning orchestration style from: {filein}")
     print("\n========= PREPROCESSING =========")
-    dfnmat = midi_to_dataframe(filein)
-    dfnmat = dfnmat.sort_values(
-        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
-        ascending=[True, True, True]
-    )
-    nmat = dfnmat.to_numpy()
-    # Get mapping from the grouped data
-    mapping = learn_quaterna_mapping(nmat, ytarget)
-    print("Mapping:", mapping)
-
-    # Build dfreduced
+    # Check if preprocessing has already been done (cached in memory)
+    # Convert transformations to a hashable format for caching
     if transformations:
-        print("\nBuilding reduced dataset with transformations")
-        dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+        # Convert each (func, kwargs) to (func.__name__, str(kwargs))
+        cache_transformations = tuple((func.__name__, str(kwargs)) for func, kwargs in transformations)
     else:
-        dfnmat_reduced = dfnmat
+        cache_transformations = None
+    cache_key = (filein, ytarget, tol, cache_transformations, multiclass)
     
-    if multiclass:
-        # Group notes by (onset, duration, pitch) within tolerance to create multi-hot labels
-        print("\nCreating multi-hot encoding for notes with instrumental doubling")
-        X, y_multihot, all_classes, mlb = defineXy_multihot(nmat, ytarget)
-        print("Number of classes:", len(all_classes))
-        print("Classes:", all_classes)
-        print("Number of events in", filein, ":", X.shape[0])
-        print("Last onset at", X[X.shape[0] - 1, 0])
-        print(y_multihot)
-        print(np.sum(y_multihot,axis=1))
-        print(max(np.sum(y_multihot,axis=1)))
+    if not hasattr(amo_with_doublings_multiclass, '_preprocessing_cache'):
+        amo_with_doublings_multiclass._preprocessing_cache = {}
+    
+    if cache_key in amo_with_doublings_multiclass._preprocessing_cache:
+        print("[CACHE] Loading preprocessing results from memory...")
+        (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f) = amo_with_doublings_multiclass._preprocessing_cache[cache_key]
     else:
-        print("\nDefine covariates and target variable. Target variable encoding")
-        X, y = defineXy(nmat, ytarget)
-        print("Labels", np.unique(y))
-        print("Number of events in", filein, ":", X.shape[0])
-        print("Last onset at", X[X.shape[0] - 1, 0])
-    
-    if fileout:
-        # Load and process target file
-        print(f"\nProcessing target file: {fileout}")
-        dfnmat2 = midi_to_dataframe(fileout)
-        dfnmat2 = dfnmat2.sort_values(
-            ['onset in quarter notes', 'duration in quarter notes', 'track number'],
-            ascending=[True, True, True]
-        )
-        nmat2 = dfnmat2.to_numpy()
-        X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
-        print("Number of events in", fileout, ":", X2.shape[0])
-        print("Last onset at", X2[X2.shape[0] - 1, 0])
-        
-        # Get original ticks_per_beat for precise timing
-        try:
-            original_midi = mido.MidiFile(fileout)
-            original_ticks_per_beat = original_midi.ticks_per_beat
-            print(f"Original ticks_per_beat: {original_ticks_per_beat}")
-        except:
-            original_ticks_per_beat = 480
-    else:
-        print("Running in validation mode.")
-    
-    if multiclass:
-        # Use MultiOutputClassifier for multi-hot prediction
-        
-        # Partition the dataset
-        X_train, X_test, y_train, y_test = train_test_split(X, y_multihot, test_size=0.2, random_state=42)
-        
-        # For full training, use all data (no split needed)
-        X_train_f = X
-        y_train_f = y_multihot
+        print("[PREPROCESSING] Computing and caching results...")
+        mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f = preprocessing(filein, ytarget, tol, transformations, multiclass)
+        amo_with_doublings_multiclass._preprocessing_cache[cache_key] = (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f)
 
+    if multiclass:
         print("\n========= TRAINING (with multi-class option) =========")
         
         # Wrap classifier for multi-output
@@ -1515,12 +1468,8 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
             # [[TN, FP],
             #  [FN, TP]]
         # --- NEW LINES END HERE ---
-
+    
     else:
-        # Partition the dataset
-        X_train, X_test, y_train, y_test, le = split_and_encode(X, y, test_size=0.2, random_state=42)
-        X_train_f, _, y_train_f, _, le_f = split_and_encode(X, y, test_size=0, random_state=42)
-        
         print("\n========= TRAINING (with single-class option) =========")
 
         # Train and predict with the specified classifier
@@ -1571,6 +1520,29 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
 
         print("Confusion Matrix (True vs Predicted Instrument Index):\n", cm)
         # --- NEW LINES END HERE ---
+
+    if fileout:
+        # Load and process target file
+        print(f"\nProcessing target file: {fileout}")
+        dfnmat2 = midi_to_dataframe(fileout)
+        dfnmat2 = dfnmat2.sort_values(
+            ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+            ascending=[True, True, True]
+        )
+        nmat2 = dfnmat2.to_numpy()
+        X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
+        print("Number of events in", fileout, ":", X2.shape[0])
+        print("Last onset at", X2[X2.shape[0] - 1, 0])
+        
+        # Get original ticks_per_beat for precise timing
+        try:
+            original_midi = mido.MidiFile(fileout)
+            original_ticks_per_beat = original_midi.ticks_per_beat
+            print(f"Original ticks_per_beat: {original_ticks_per_beat}")
+        except:
+            original_ticks_per_beat = 480
+    else:
+        print("Running in validation mode.")
 
     if transformations: # TODO: Use one model for multi-variate target prediction
         print("\nTransformation classification (training on orchestral file, prediction for target piano file)")
@@ -1655,6 +1627,58 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         print(f"Final pipeline saved: {pipeline_path}")
 
     return metrics
+
+def preprocessing(filein, ytarget, tol, transformations, multiclass):
+    dfnmat = midi_to_dataframe(filein)
+    dfnmat = dfnmat.sort_values(
+        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+        ascending=[True, True, True]
+    )
+    nmat = dfnmat.to_numpy()
+    # Get mapping from the grouped data
+    mapping = learn_quaterna_mapping(nmat, ytarget)
+    print("Mapping:", mapping)
+
+    # Build dfreduced
+    if transformations:
+        print("\nBuilding reduced dataset with transformations")
+        dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    else:
+        dfnmat_reduced = dfnmat
+    
+    if multiclass:
+        # Group notes by (onset, duration, pitch) within tolerance to create multi-hot labels
+        print("\nCreating multi-hot encoding for notes with instrumental doubling")
+        X, y_multihot, all_classes, mlb = defineXy_multihot(nmat, ytarget)
+        print("Number of classes:", len(all_classes))
+        print("Classes:", all_classes)
+        print("Number of events in", filein, ":", X.shape[0])
+        print("Last onset at", X[X.shape[0] - 1, 0])
+        print(y_multihot)
+        print(np.sum(y_multihot,axis=1))
+        print(max(np.sum(y_multihot,axis=1)))
+
+        # Partition the dataset
+        X_train, X_test, y_train, y_test = train_test_split(X, y_multihot, test_size=0.2, random_state=42)
+        
+        # For full training, use all data (no split needed)
+        X_train_f = X
+        y_train_f = y_multihot
+
+        le_f = None
+    else:
+        print("\nDefine covariates and target variable. Target variable encoding")
+        X, y = defineXy(nmat, ytarget)
+        print("Labels", np.unique(y))
+        print("Number of events in", filein, ":", X.shape[0])
+        print("Last onset at", X[X.shape[0] - 1, 0])
+
+        # Partition the dataset
+        X_train, X_test, y_train, y_test, le = split_and_encode(X, y, test_size=0.2, random_state=42)
+        X_train_f, _, y_train_f, _, le_f = split_and_encode(X, y, test_size=0, random_state=42)
+
+        all_classes, mlb = None, None
+    return mapping,dfnmat_reduced,all_classes,mlb,X_train,X_test,y_train,y_test,X_train_f,y_train_f,le_f
 
 
 # ===== HELPER FUNCTIONS FOR MULTI-HOT ENCODING =====

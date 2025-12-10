@@ -1330,13 +1330,13 @@ def expand_estimated_transform(df, transformations=None):
 
 def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
     """
-    GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025
+    GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025 + FM 09.12.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
     using a single specified machine learning model and preserves musical structure.
     Modified to support multi-class instrument prediction with multi-hot encoding.
 
     Args:
-        filein (str): Path to the source MIDI file to learn orchestration style from.
+        filein (str or list): Path or list of paths to the source MIDI file to learn orchestration style from.
         fileout (str): Path to the target MIDI file to be orchestrated.
         ytarget (str, optional): The target variable for the model ('track-channel' or 'program').
                                  Defaults to "track-channel".
@@ -1383,8 +1383,13 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
     clf_name = model
     clf = classifiers_map[clf_name]
 
-    # Load and process source file
-    print(f"Learning orchestration style from: {filein}")
+    # Load and process source file or source files
+    if isinstance(filein, list):
+        print(f"Learning orchestration style from {len(filein)} files")
+        cache_filein = str(filein)
+    else:
+        print(f"Learning orchestration style from: {filein}")
+        cache_filein = filein
     print("\n========= PREPROCESSING =========")
     # Check if preprocessing has already been done (cached in memory)
     # Convert transformations to a hashable format for caching
@@ -1393,7 +1398,7 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         cache_transformations = tuple((func.__name__, str(kwargs)) for func, kwargs in transformations)
     else:
         cache_transformations = None
-    cache_key = (filein, ytarget, tol, cache_transformations, multiclass)
+    cache_key = (cache_filein, ytarget, tol, cache_transformations, multiclass)
     
     if not hasattr(amo_with_doublings_multiclass, '_preprocessing_cache'):
         amo_with_doublings_multiclass._preprocessing_cache = {}
@@ -1629,22 +1634,22 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
     return metrics
 
 def preprocessing(filein, ytarget, tol, transformations, multiclass):
-    dfnmat = midi_to_dataframe(filein)
-    dfnmat = dfnmat.sort_values(
-        ['onset in quarter notes', 'duration in quarter notes', 'track number'],
-        ascending=[True, True, True]
-    )
-    nmat = dfnmat.to_numpy()
+    if isinstance(filein, list):
+        # TODO: Modify so that the train-test split happens at file level
+        dfs = []
+        nmats = []
+        for f_in in filein:
+            nmt, df_red = midi_to_transformed_datasets(f_in, tol, transformations)
+            dfs.append(df_red)
+            nmats.append(nmt)
+        dfnmat_reduced = pd.concat(dfs, ignore_index=True)
+        nmat = np.concatenate(nmats, axis=0)
+    else:
+        nmat, dfnmat_reduced = midi_to_transformed_datasets(filein, tol, transformations)
+
     # Get mapping from the grouped data
     mapping = learn_quaterna_mapping(nmat, ytarget)
     print("Mapping:", mapping)
-
-    # Build dfreduced
-    if transformations:
-        print("\nBuilding reduced dataset with transformations")
-        dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
-    else:
-        dfnmat_reduced = dfnmat
     
     if multiclass:
         # Group notes by (onset, duration, pitch) within tolerance to create multi-hot labels
@@ -1679,6 +1684,22 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
 
         all_classes, mlb = None, None
     return mapping,dfnmat_reduced,all_classes,mlb,X_train,X_test,y_train,y_test,X_train_f,y_train_f,le_f
+
+def midi_to_transformed_datasets(filein, tol, transformations):
+    dfnmat = midi_to_dataframe(filein) 
+    dfnmat = dfnmat.sort_values(
+            ['onset in quarter notes', 'duration in quarter notes', 'track number'],
+            ascending=[True, True, True]
+        )
+    nmat = dfnmat.to_numpy()
+
+        # Build dfreduced
+    if transformations:
+        print(f"\nBuilding reduced dataset with transformations. {filein}")
+        dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
+    else:
+        dfnmat_reduced = dfnmat
+    return nmat,dfnmat_reduced
 
 
 # ===== HELPER FUNCTIONS FOR MULTI-HOT ENCODING =====

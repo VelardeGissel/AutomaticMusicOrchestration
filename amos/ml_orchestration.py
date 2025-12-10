@@ -257,6 +257,9 @@ def defineXy(nmat, ytarget="track-channel"):
     if ytarget == "program":
         X = nmat[:, 4:8]  # onset, duration, pitch, velocity
         y = nmat[:, 3]    # program
+    elif ytarget == "instrument-name":
+        X = nmat[:, 4:8]  # onset, duration, pitch, velocity (indices 4-7)
+        y = nmat[:, 1].astype(str)
     else:
         # X: onset, duration, pitch, velocity, y=track_channel
         X = nmat[:, 4:8]  # onset, duration, pitch, velocity
@@ -1267,8 +1270,10 @@ def predict_with_trained_model(df_target, pipeline_path):
 
 def findInsName(mapping, class_name, ytarget):
 
-    if ytarget!='track-channel':
+    if ytarget!='track-channel' and ytarget != "instrument-name":
         raise TypeError(f"{ytarget} unsupported as ytarget in findInsName")
+    elif ytarget == "instrument-name":
+        return class_name
     
     track, channel = class_name.split('_')
     track, channel = int(track), int(channel)
@@ -1639,13 +1644,13 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
         dfs = []
         nmats = []
         for f_in in filein:
-            nmt, df_red = midi_to_transformed_datasets(f_in, tol, transformations)
+            nmt, df_red = midi_to_transformed_datasets(f_in, ytarget, tol, transformations)
             dfs.append(df_red)
             nmats.append(nmt)
         dfnmat_reduced = pd.concat(dfs, ignore_index=True)
         nmat = np.concatenate(nmats, axis=0)
     else:
-        nmat, dfnmat_reduced = midi_to_transformed_datasets(filein, tol, transformations)
+        nmat, dfnmat_reduced = midi_to_transformed_datasets(filein, ytarget, tol, transformations)
 
     # Get mapping from the grouped data
     mapping = learn_quaterna_mapping(nmat, ytarget)
@@ -1685,12 +1690,16 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
         all_classes, mlb = None, None
     return mapping,dfnmat_reduced,all_classes,mlb,X_train,X_test,y_train,y_test,X_train_f,y_train_f,le_f
 
-def midi_to_transformed_datasets(filein, tol, transformations):
+def midi_to_transformed_datasets(filein, ytarget, tol, transformations):
     dfnmat = midi_to_dataframe(filein) 
     dfnmat = dfnmat.sort_values(
             ['onset in quarter notes', 'duration in quarter notes', 'track number'],
             ascending=[True, True, True]
         )
+    if ytarget == "instrument-name":
+        file_instruments = os.path.splitext(filein)[0] + ".csv"
+        instrument_uniformer = instrument_names_uniformer(file_instruments)
+        dfnmat = uniform_names(dfnmat, instrument_uniformer)
     nmat = dfnmat.to_numpy()
 
         # Build dfreduced
@@ -1701,6 +1710,19 @@ def midi_to_transformed_datasets(filein, tol, transformations):
         dfnmat_reduced = dfnmat
     return nmat,dfnmat_reduced
 
+def instrument_names_uniformer(file_instruments):
+    try:
+        df_instruments = pd.read_csv(file_instruments, sep=";", header=None)
+        keys = df_instruments.iloc[0].tolist()
+        values = df_instruments.iloc[1].tolist()
+        return dict(zip(keys, values))
+    except:
+        print("Insturment names not uniformed")
+        return None
+
+def uniform_names(dfnmat, instrument_uniformer):
+    dfnmat['track name'] = dfnmat['track name'].map(instrument_uniformer).fillna(dfnmat['track name'])
+    return dfnmat
 
 # ===== HELPER FUNCTIONS FOR MULTI-HOT ENCODING =====
 
@@ -1730,6 +1752,9 @@ def defineXy_multihot(nmat, ytarget="track-channel"):
         # y = program (index 3)
         X = nmat[:, 4:8]  # onset, duration, pitch, velocity (indices 4-7)
         y = nmat[:, 3].astype(str)
+    elif ytarget == "instrument-name":
+        X = nmat[:, 4:8]  # onset, duration, pitch, velocity (indices 4-7)
+        y = nmat[:, 1].astype(str)
     else: # ytarget == "track-channel"
         # y = track_channel (indices 0 and 2)
         X = nmat[:, 4:8]  # onset, duration, pitch, velocity

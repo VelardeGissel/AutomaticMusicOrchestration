@@ -1094,6 +1094,10 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     # Define available classifiers and their names
     classifiers_map = {
         "XGBoost": XGBClassifier(),
+        "XGBoost5": XGBClassifier(n_estimators = 5),
+        "XGBoost10": XGBClassifier(n_estimators = 10),
+        "XGBoost20": XGBClassifier(n_estimators = 20),
+        "XGBoost50": XGBClassifier(n_estimators = 50),
         "RandomForest": RandomForestClassifier(),
         "DecisionTree": DecisionTreeClassifier(),
         "NearestNeighbors": KNeighborsClassifier(1),
@@ -1101,6 +1105,9 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
         "NaiveBayes": GaussianNB(),
         "MLP1": MLPClassifier(),
         "AdaBoost": AdaBoostClassifier(),
+        "Dummy0": DummyClassifier(strategy='constant', constant=0),
+        "Dummy1": DummyClassifier(strategy='constant', constant=1),
+        "DummyUnif": DummyClassifier(strategy='uniform'),
     }
     
     if KERAS_AVAILABLE:
@@ -1559,12 +1566,15 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         for func, kwargs in transformations:
             yexptarget = f"{func.__name__}_{kwargs}"
             print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
-            # TODO: get the metrics also for the transform
-            transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model="XGBoost", pipeline_path=f"{yexptarget}.joblib")
+            if 'train_all' in pipeline_path:
+                transform_joblib_path = f"weights/train_all_{model}_{yexptarget}.joblib"
+            else:
+                transform_joblib_path = f"weights/{model}_{yexptarget}.joblib"
+            transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model=model, pipeline_path=transform_joblib_path)
             metrics.update(transform_metrics)
             if fileout:
                 try:
-                    dfnmat2, _, _ = predict_with_trained_model(dfnmat2, f"{yexptarget}.joblib")
+                    dfnmat2, _, _ = predict_with_trained_model(dfnmat2, transform_joblib_path)
                 except:
                     print(f"No prediction for {yexptarget}: setting to 0")
                     dfnmat2[yexptarget] = 0

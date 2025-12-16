@@ -1340,7 +1340,7 @@ def expand_estimated_transform(df, transformations=None):
     df_expanded = pd.DataFrame(expanded_rows).reset_index(drop=True)
     return df_expanded
 
-def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
+def amo_with_doublings_multiclass(filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
     """
     GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025 + FM 09.12.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
@@ -1396,147 +1396,151 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
     clf = classifiers_map[clf_name]
 
     # Load and process source file or source files
-    if isinstance(filein, list):
-        print(f"Learning orchestration style from {len(filein)} files")
-        cache_filein = str(filein)
+    if filein is None:
+        print(f"No input files for training.")
     else:
-        print(f"Learning orchestration style from: {filein}")
-        cache_filein = filein
-    print("\n========= PREPROCESSING =========")
-    # Check if preprocessing has already been done (cached in memory)
-    # Convert transformations to a hashable format for caching
-    if transformations:
-        # Convert each (func, kwargs) to (func.__name__, str(kwargs))
-        cache_transformations = tuple((func.__name__, str(kwargs)) for func, kwargs in transformations)
-    else:
-        cache_transformations = None
-    cache_key = (cache_filein, ytarget, tol, cache_transformations, multiclass)
-    
-    if not hasattr(amo_with_doublings_multiclass, '_preprocessing_cache'):
-        amo_with_doublings_multiclass._preprocessing_cache = {}
-    
-    if cache_key in amo_with_doublings_multiclass._preprocessing_cache:
-        print("[CACHE] Loading preprocessing results from memory...")
-        (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f) = amo_with_doublings_multiclass._preprocessing_cache[cache_key]
-    else:
-        print("[PREPROCESSING] Computing and caching results...")
-        mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f = preprocessing(filein, ytarget, tol, transformations, multiclass)
-        amo_with_doublings_multiclass._preprocessing_cache[cache_key] = (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f)
-
-    if multiclass:
-        print("\n========= TRAINING (with multi-class option) =========")
-        
-        # Wrap classifier for multi-output
-        print("\nInstrument classification")
-        print(f"--------- {clf_name} (Multi-Output) ---------")
-        start = time.time()
-        
-        if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
-            base_clf = make_pipeline(StandardScaler(), clf)
+        if isinstance(filein, list):
+            print(f"Learning orchestration style from {len(filein)} files")
+            cache_filein = str(filein)
         else:
-            base_clf = clf
-        
-        clf_pipeline = MultiOutputClassifier(base_clf)
-        clf_pipeline.fit(X_train, y_train)
-        
-        # Calculate score (average across all outputs)
-        score_test = clf_pipeline.score(X_test, y_test)
-        score_train = clf_pipeline.score(X_train, y_train)
-
-        # --- NEW LINES START HERE ---
-        # Get predictions for metric calculation
-        y_pred_test = clf_pipeline.predict(X_test) 
-        y_pred_train = clf_pipeline.predict(X_train) 
-
-        # Calculate additional metrics using 'micro' average for multi-label data
-        # 'Micro' aggregates the contributions of all classes to compute the average metric.
-        precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(y_test, y_pred_test, average='micro', zero_division=0)
-        precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_train, y_pred_train, average='micro', zero_division=0)
-        # --- NEW LINES END HERE ---
-
-        end = time.time()
-        
-        metrics['time'] = end - start
-        print("Train Time (sec):", f"{end - start:.4f}")
-        metrics['accuracy (test)'] = score_test
-        metrics['accuracy (train)'] = score_train
-        print("Score on Test (20%):", f"{score_test:.4f}")
-
-        # --- NEW LINES START HERE ---
-        metrics['precision (test)'] = precision_test
-        metrics['precision (train)'] = precision_train
-        print("Precision (micro):", f"{precision_test:.4f}")
-        metrics['recall (test)'] = recall_test
-        metrics['recall (train)'] = recall_train
-        print("Recall (micro):", f"{recall_test:.4f}")
-        metrics['f1 (test)'] = f1_test
-        metrics['f1 (train)'] = f1_train
-        print("F1-Score (micro):", f"{f1_test:.4f}")
-
-        print("Confusion Matrices for Individual Classes:")
-        # Loop through each output (instrument/class)
-        for i, class_name in enumerate(all_classes):
-            ins_name = findInsName(mapping, class_name, ytarget)
-            # Calculate CM for the i-th column (i-th class)
-            cm_i = confusion_matrix(y_test[:, i], y_pred_test[:, i])
-            print(f"--- Class: {class_name} {ins_name} ---")
-            print(cm_i)
-            # Example interpretation:
-            # [[TN, FP],
-            #  [FN, TP]]
-        # --- NEW LINES END HERE ---
+            print(f"Learning orchestration style from: {filein}")
+            cache_filein = filein
     
-    else:
-        print("\n========= TRAINING (with single-class option) =========")
-
-        # Train and predict with the specified classifier
-        print("\nInstrument classification")
-        print(f"\n--------- {clf_name} ---------")
-        start = time.time()
-        
-        if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
-            clf_pipeline = make_pipeline(StandardScaler(), clf)
+        print("\n========= PREPROCESSING =========")
+        # Check if preprocessing has already been done (cached in memory)
+        # Convert transformations to a hashable format for caching
+        if transformations:
+            # Convert each (func, kwargs) to (func.__name__, str(kwargs))
+            cache_transformations = tuple((func.__name__, str(kwargs)) for func, kwargs in transformations)
         else:
-            clf_pipeline = clf
+            cache_transformations = None
+        cache_key = (cache_filein, ytarget, tol, cache_transformations, multiclass)
+        
+        if not hasattr(amo_with_doublings_multiclass, '_preprocessing_cache'):
+            amo_with_doublings_multiclass._preprocessing_cache = {}
+        
+        if cache_key in amo_with_doublings_multiclass._preprocessing_cache:
+            print("[CACHE] Loading preprocessing results from memory...")
+            (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f) = amo_with_doublings_multiclass._preprocessing_cache[cache_key]
+        else:
+            print("[PREPROCESSING] Computing and caching results...")
+            mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f = preprocessing(filein, ytarget, tol, transformations, multiclass)
+            amo_with_doublings_multiclass._preprocessing_cache[cache_key] = (mapping, dfnmat_reduced, all_classes, mlb, X_train, X_test, y_train, y_test, X_train_f, y_train_f, le_f)
+
+        if multiclass:
+            print("\n========= TRAINING (with multi-class option) =========")
             
-        clf_pipeline.fit(X_train, y_train)
-        score_test = clf_pipeline.score(X_test, y_test)
-        score_train = clf_pipeline.score(X_train, y_train)
+            # Wrap classifier for multi-output
+            print("\nInstrument classification")
+            print(f"--------- {clf_name} (Multi-Output) ---------")
+            start = time.time()
+            
+            if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
+                base_clf = make_pipeline(StandardScaler(), clf)
+            else:
+                base_clf = clf
+            
+            clf_pipeline = MultiOutputClassifier(base_clf)
+            clf_pipeline.fit(X_train, y_train)
+            
+            # Calculate score (average across all outputs)
+            score_test = clf_pipeline.score(X_test, y_test)
+            score_train = clf_pipeline.score(X_train, y_train)
 
-        # --- NEW LINES START HERE ---
-        # Get predictions for metric calculation
-        y_pred_test = clf_pipeline.predict(X_test)
-        y_pred_train = clf_pipeline.predict(X_train)
+            # --- NEW LINES START HERE ---
+            # Get predictions for metric calculation
+            y_pred_test = clf_pipeline.predict(X_test) 
+            y_pred_train = clf_pipeline.predict(X_train) 
+
+            # Calculate additional metrics using 'micro' average for multi-label data
+            # 'Micro' aggregates the contributions of all classes to compute the average metric.
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(y_test, y_pred_test, average='micro', zero_division=0)
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_train, y_pred_train, average='micro', zero_division=0)
+            # --- NEW LINES END HERE ---
+
+            end = time.time()
+            
+            metrics['time'] = end - start
+            print("Train Time (sec):", f"{end - start:.4f}")
+            metrics['accuracy (test)'] = score_test
+            metrics['accuracy (train)'] = score_train
+            print("Score on Test (20%):", f"{score_test:.4f}")
+
+            # --- NEW LINES START HERE ---
+            metrics['precision (test)'] = precision_test
+            metrics['precision (train)'] = precision_train
+            print("Precision (micro):", f"{precision_test:.4f}")
+            metrics['recall (test)'] = recall_test
+            metrics['recall (train)'] = recall_train
+            print("Recall (micro):", f"{recall_test:.4f}")
+            metrics['f1 (test)'] = f1_test
+            metrics['f1 (train)'] = f1_train
+            print("F1-Score (micro):", f"{f1_test:.4f}")
+
+            print("Confusion Matrices for Individual Classes:")
+            # Loop through each output (instrument/class)
+            for i, class_name in enumerate(all_classes):
+                ins_name = findInsName(mapping, class_name, ytarget)
+                # Calculate CM for the i-th column (i-th class)
+                cm_i = confusion_matrix(y_test[:, i], y_pred_test[:, i])
+                print(f"--- Class: {class_name} {ins_name} ---")
+                print(cm_i)
+                # Example interpretation:
+                # [[TN, FP],
+                #  [FN, TP]]
+            # --- NEW LINES END HERE ---
         
-        # Calculate additional metrics using 'weighted' average for multiclass data
-        # 'Weighted' accounts for class imbalance by weighting the scores by the number of true instances for each label.
-        precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(y_test, y_pred_test, average='weighted', zero_division=0)
-        precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_train, y_pred_train, average='micro', zero_division=0)
-        # Calculate the Confusion Matrix for single-class
-        cm = confusion_matrix(y_test, y_pred_test)
-        # --- NEW LINES END HERE ---
+        else:
+            print("\n========= TRAINING (with single-class option) =========")
 
-        end = time.time()
-        
-        metrics['time'] = end - start
-        print("Train Time (sec):", f"{end - start:.4f}")
-        metrics['accuracy (test)'] = score_test
-        metrics['accuracy (train)'] = score_train
-        print("Score on Test (20%):", f"{score_test:.4f}")
+            # Train and predict with the specified classifier
+            print("\nInstrument classification")
+            print(f"\n--------- {clf_name} ---------")
+            start = time.time()
+            
+            if clf_name in ["LSTMClassifier", "TransformerClassifier"]:
+                clf_pipeline = make_pipeline(StandardScaler(), clf)
+            else:
+                clf_pipeline = clf
+                
+            clf_pipeline.fit(X_train, y_train)
+            score_test = clf_pipeline.score(X_test, y_test)
+            score_train = clf_pipeline.score(X_train, y_train)
 
-        # --- NEW LINES START HERE ---
-        metrics['precision (test)'] = precision_test
-        metrics['precision (train)'] = precision_train
-        print("Precision (micro):", f"{precision_test:.4f}")
-        metrics['recall (test)'] = recall_test
-        metrics['recall (train)'] = recall_train
-        print("Recall (micro):", f"{recall_test:.4f}")
-        metrics['f1 (test)'] = f1_test
-        metrics['f1 (train)'] = f1_train
-        print("F1-Score (micro):", f"{f1_test:.4f}")
+            # --- NEW LINES START HERE ---
+            # Get predictions for metric calculation
+            y_pred_test = clf_pipeline.predict(X_test)
+            y_pred_train = clf_pipeline.predict(X_train)
+            
+            # Calculate additional metrics using 'weighted' average for multiclass data
+            # 'Weighted' accounts for class imbalance by weighting the scores by the number of true instances for each label.
+            precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(y_test, y_pred_test, average='weighted', zero_division=0)
+            precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_train, y_pred_train, average='micro', zero_division=0)
+            # Calculate the Confusion Matrix for single-class
+            cm = confusion_matrix(y_test, y_pred_test)
+            # --- NEW LINES END HERE ---
 
-        print("Confusion Matrix (True vs Predicted Instrument Index):\n", cm)
-        # --- NEW LINES END HERE ---
+            end = time.time()
+            
+            metrics['time'] = end - start
+            print("Train Time (sec):", f"{end - start:.4f}")
+            metrics['accuracy (test)'] = score_test
+            metrics['accuracy (train)'] = score_train
+            print("Score on Test (20%):", f"{score_test:.4f}")
+
+            # --- NEW LINES START HERE ---
+            metrics['precision (test)'] = precision_test
+            metrics['precision (train)'] = precision_train
+            print("Precision (micro):", f"{precision_test:.4f}")
+            metrics['recall (test)'] = recall_test
+            metrics['recall (train)'] = recall_train
+            print("Recall (micro):", f"{recall_test:.4f}")
+            metrics['f1 (test)'] = f1_test
+            metrics['f1 (train)'] = f1_train
+            print("F1-Score (micro):", f"{f1_test:.4f}")
+
+            print("Confusion Matrix (True vs Predicted Instrument Index):\n", cm)
+            # --- NEW LINES END HERE ---
 
     if fileout:
         # Load and process target file
@@ -1565,13 +1569,15 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         print("\nTransformation classification (training on orchestral file, prediction for target piano file)")
         for func, kwargs in transformations:
             yexptarget = f"{func.__name__}_{kwargs}"
-            print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
+            if filein is not None:
+                print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
             if 'train_all' in pipeline_path:
                 transform_joblib_path = f"weights/train_all_{model}_{yexptarget}.joblib"
             else:
                 transform_joblib_path = f"weights/{model}_{yexptarget}.joblib"
-            transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model=model, pipeline_path=transform_joblib_path)
-            metrics.update(transform_metrics)
+            if filein is not None:
+                transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model=model, pipeline_path=transform_joblib_path)
+                metrics.update(transform_metrics)
             if fileout:
                 try:
                     dfnmat2, _, _ = predict_with_trained_model(dfnmat2, transform_joblib_path)
@@ -1600,11 +1606,25 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         
         if multiclass:
             # Predict orchestration with multi-hot output
-            clf_pipeline.fit(X_train_f, y_train_f)
+            if filein is None:
+                artifact = joblib.load(pipeline_path)
+                clf_pipeline = artifact["pipeline"]
+                mapping = artifact["mapping"]
+                ytarget = artifact["ytarget"]
+                mlb = artifact["multilabel_binarizer"]
+            else:
+                clf_pipeline.fit(X_train_f, y_train_f)
             data = multihot_clf_predict(X2, mlb, clf_pipeline, mapping, ytarget)
         else:
             # Predict orchestration
-            clf_pipeline.fit(X_train_f, y_train_f)
+            if filein is None:
+                artifact = joblib.load(pipeline_path)
+                clf_pipeline = artifact["pipeline"]
+                mapping = artifact["mapping"]
+                ytarget = artifact["ytarget"]
+                le_f = artifact["label_encoder"]
+            else:
+                clf_pipeline.fit(X_train_f, y_train_f)
             data = clf_predict(X2, le_f, clf_pipeline, mapping, ytarget)
 
         print("\n========= POSTPROCESSING AND SAVING =========")
@@ -1628,7 +1648,8 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         # Save with preserved musical structure
         transform_suffix = "_WITH_DOUBLINGS" if (transformations and len(transformations) > 0) else ""
         multiclass_suffix = "_MULTICLASS" if multiclass else ""
-        suffixes = f"_{clf_name}_WITH_TIMING{transform_suffix}{multiclass_suffix}.mid"
+        trainall_suffix = "_TRAIN_ALL" if 'train_all' in pipeline_path else ""
+        suffixes = f"_{clf_name}_WITH_TIMING{transform_suffix}{multiclass_suffix}{trainall_suffix}.mid"
         filename = fileout.replace(".mid", suffixes)
         print('Orchestration with preserved structure:', filename)
         
@@ -1636,13 +1657,17 @@ def amo_with_doublings_multiclass(filein, fileout=None, ytarget="track-channel",
         save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
     
     # Save all needed artifacts
-    if pipeline_path!="": 
+    if pipeline_path!="" and filein is not None:
         artifact = {
             "pipeline": clf_pipeline,
             "all_classes": all_classes,      # Store class list for multi-hot
             "mapping": mapping,
             "ytarget": ytarget,
         }
+        if multiclass:
+            artifact["multilabel_binarizer"] = mlb
+        else:
+            artifact["label_encoder"] = le_f
         joblib.dump(artifact, pipeline_path)
         print(f"Final pipeline saved: {pipeline_path}")
 

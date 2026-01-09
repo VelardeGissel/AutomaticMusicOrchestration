@@ -29,8 +29,8 @@ import joblib
 from datetime import datetime
 #2.10.2025
 # Import from local modules
-from midi2df2midi import midi_to_dataframe, save_midi_from_df
-from mappings import fill_quaterna_columns, learn_quaterna_mapping
+from .midi2df2midi import midi_to_dataframe, save_midi_from_df
+from .mappings import fill_quaterna_columns, learn_quaterna_mapping
 #23.10.2025
 from collections import defaultdict
 #05.11.2025
@@ -1584,9 +1584,9 @@ def amo_with_doublings_multiclass(filein=None, fileout=None, ytarget="track-chan
             if filein is not None:
                 print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
             if 'train_all' in pipeline_path:
-                transform_joblib_path = f"weights/train_all_{model}_{yexptarget}.joblib"
+                transform_joblib_path = f"models/weights/train_all_{model}_{yexptarget}.joblib"
             else:
-                transform_joblib_path = f"weights/{model}_{yexptarget}.joblib"
+                transform_joblib_path = f"models/weights/{model}_{yexptarget}.joblib"
             if filein is not None:
                 transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model=model, pipeline_path=transform_joblib_path)
                 metrics.update(transform_metrics)
@@ -2130,8 +2130,8 @@ def amo_load_and_orchestrate(
     ----------
     pipeline_path : str
         Path to the saved pipeline artifact (.joblib).
-        Expected format: weights/{style}_{model_type}.joblib
-        Example: weights/beethoven_xgboost.joblib
+        Expected format: models/weights/{style}_{model_type}.joblib
+        Example: models/weights/beethoven_xgboost.joblib
     target_midi_path : str
         Path to the target MIDI to orchestrate.
     output_midi_path : str, optional
@@ -2147,7 +2147,7 @@ def amo_load_and_orchestrate(
         raise FileNotFoundError(f"Pipeline not found: {pipeline_path}")
 
     # Extract style and model_type from pipeline filename
-    # Expected format: weights/{style}_{model_type}.joblib
+    # Expected format: models/weights/{style}_{model_type}.joblib
     import re
     pipeline_filename = os.path.basename(pipeline_path)
     match = re.match(r'(\w+)_(\w+)\.joblib$', pipeline_filename)

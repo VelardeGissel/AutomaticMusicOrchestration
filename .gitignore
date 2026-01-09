@@ -1,8 +1,6 @@
 **/__pycache__/*.*
 
-*.mid
-*.midi
 
-*.joblib
+runtime/
 
 LOP_database_06_09_17

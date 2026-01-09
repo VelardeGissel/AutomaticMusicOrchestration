@@ -25,11 +25,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-# Add amos directory to Python path
-sys.path.append('amos')
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
+if SRC_DIR.exists():
+    sys.path.insert(0, str(SRC_DIR))
 
 # Import AMO orchestration function
-from amos.ml_orchestration import amo_load_and_orchestrate
+from amo.ml_orchestration import amo_load_and_orchestrate
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -48,13 +50,13 @@ app.add_middleware(
 )
 
 # Configuration
-WEIGHTS_DIR = Path("weights")
-UPLOAD_DIR = Path("uploads")
-OUTPUT_DIR = Path("outputs")
+WEIGHTS_DIR = REPO_ROOT / "models" / "weights"
+UPLOAD_DIR = REPO_ROOT / "runtime" / "uploads"
+OUTPUT_DIR = REPO_ROOT / "runtime" / "outputs"
 
 # Create directories if they don't exist
-UPLOAD_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Model type descriptions
 MODEL_TYPES = {

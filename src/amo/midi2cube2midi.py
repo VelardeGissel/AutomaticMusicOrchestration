@@ -1,7 +1,5 @@
 #GV 25.Sep-2025
-import sys
-sys.path.append('amos') 
-from amos.midi2df2midi import midi_to_dataframe, save_midi_from_df
+from .midi2df2midi import midi_to_dataframe, save_midi_from_df
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

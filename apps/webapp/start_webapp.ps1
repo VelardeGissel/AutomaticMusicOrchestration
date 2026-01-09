@@ -6,6 +6,9 @@ Write-Host "AMO - Automatic Music Orchestration Web App" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\\..")
+
 # Check if Python is available
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: Python not found!" -ForegroundColor Red
@@ -23,7 +26,8 @@ if (-not $fastApiCheck) {
     Write-Host ""
     Write-Host "FastAPI is not installed." -ForegroundColor Yellow
     Write-Host "Installing Web App dependencies..." -ForegroundColor Yellow
-    pip install -r requirements_webapp.txt
+    $requirementsPath = Join-Path $ScriptDir "requirements.txt"
+    pip install -r $requirementsPath
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Installation failed!" -ForegroundColor Red
         exit 1
@@ -36,7 +40,8 @@ Write-Host "Checking available models..." -ForegroundColor Yellow
 $models = @("beethoven.joblib", "debussy.joblib", "tchaikovsky.joblib")
 $foundModels = 0
 foreach ($model in $models) {
-    if (Test-Path "weights\$model") {
+    $modelPath = Join-Path $RepoRoot "models\\weights\\$model"
+    if (Test-Path $modelPath) {
         Write-Host "  [OK] $model found" -ForegroundColor Green
         $foundModels++
     } else {
@@ -46,7 +51,7 @@ foreach ($model in $models) {
 
 if ($foundModels -eq 0) {
     Write-Host ""
-    Write-Host "WARNING: No models found in weights/ directory!" -ForegroundColor Red
+    Write-Host "WARNING: No models found in models/weights/ directory!" -ForegroundColor Red
     Write-Host "Please ensure the .joblib files are present." -ForegroundColor Yellow
 }
 
@@ -59,4 +64,4 @@ Write-Host "================================================" -ForegroundColor C
 Write-Host ""
 
 # Start server
-python webapp.py
+python (Join-Path $ScriptDir "webapp.py")

@@ -1,4 +1,4 @@
-# 🎵 AMO Web Application - Quick Start Guide
+﻿# 🎵 AMO Web Application - Quick Start Guide
 
 ## Was wurde erstellt?
 
@@ -6,10 +6,10 @@ Eine vollständige Web-Anwendung für automatische Musik-Orchestrierung mit:
 
 ### Dateien:
 1. **`webapp.py`** - Haupt-Web-Anwendung (FastAPI + Uvicorn)
-2. **`requirements_webapp.txt`** - Benötigte Python-Pakete
+2. **`requirements.txt`** - Benötigte Python-Pakete
 3. **`start_webapp.ps1`** - Windows PowerShell Start-Skript
-4. **`README_webapp.md`** - Ausführliche Dokumentation
-5. **`webapp_api_examples.ipynb`** - Jupyter Notebook mit API-Beispielen
+4. **`README.md`** - Ausführliche Dokumentation
+5. **`notebooks/webapp_api_examples.ipynb`** - Jupyter Notebook mit API-Beispielen
 
 ### Features:
 - ✅ Benutzerfreundliches Web-Interface mit Bootstrap 5
@@ -27,7 +27,7 @@ Eine vollständige Web-Anwendung für automatische Musik-Orchestrierung mit:
 ### Schritt 1: Abhängigkeiten installieren
 
 ```powershell
-pip install -r requirements_webapp.txt
+pip install -r requirements.txt
 ```
 
 ### Schritt 2: Server starten
@@ -59,7 +59,7 @@ http://localhost:8001
 5. Laden Sie die orchestrierte MIDI-Datei herunter
 
 ### API-Verwendung:
-Siehe `webapp_api_examples.ipynb` für detaillierte Beispiele mit Python requests.
+Siehe `notebooks/webapp_api_examples.ipynb` für detaillierte Beispiele mit Python requests.
 
 ## 🛠️ Technische Details
 
@@ -77,9 +77,9 @@ Browser → FastAPI Server → amo_load_and_orchestrate() → Orchestrierte MIDI
 
 ### Dateifluss:
 ```
-uploads/     → Temporäre Uploads (werden nach Verarbeitung gelöscht)
-outputs/     → Orchestrierte MIDI-Dateien (bleiben erhalten)
-weights/     → Trainierte ML-Modelle (.joblib)
+runtime/uploads/     → Temporäre Uploads (werden nach Verarbeitung gelöscht)
+runtime/outputs/     → Orchestrierte MIDI-Dateien (bleiben erhalten)
+models/weights/     → Trainierte ML-Modelle (.joblib)
 ```
 
 ## 🔧 Konfiguration
@@ -105,19 +105,19 @@ uvicorn webapp:app --port 8080
 
 ### "Modelle nicht gefunden":
 Stellen Sie sicher, dass diese Dateien existieren:
-- `weights/beethoven.joblib`
-- `weights/debussy.joblib`
-- `weights/tchaikovsky.joblib`
+- `models/weights/beethoven.joblib`
+- `models/weights/debussy.joblib`
+- `models/weights/tchaikovsky.joblib`
 
 ### "FastAPI nicht gefunden":
 ```powershell
-pip install -r requirements_webapp.txt
+pip install -r requirements.txt
 ```
 
-### "Import-Fehler aus amos/":
+### "Import-Fehler aus src/amo/":
 Stellen Sie sicher, dass Sie im richtigen Verzeichnis sind:
 ```powershell
-cd C:\Repositories\AMO\AutomaticMusicOrchestration
+cd C:\Repositories\AMO\AutomaticMusicOrchestration\apps\webapp
 ```
 
 ## 📊 Test-Beispiel
@@ -130,7 +130,7 @@ response = requests.get("http://localhost:8000/api/health")
 print(response.json())  # {'status': 'healthy', 'available_models': 3}
 
 # MIDI orchestrieren
-with open('midis/fur-elise.mid', 'rb') as f:
+with open('data/samples/midis/fur-elise.mid', 'rb') as f:
     files = {'file': f}
     data = {'model': 'beethoven'}
     response = requests.post(
@@ -143,8 +143,8 @@ with open('midis/fur-elise.mid', 'rb') as f:
 
 ## 📚 Weitere Ressourcen
 
-- **Ausführliche Dokumentation:** `README_webapp.md`
-- **API-Beispiele:** `webapp_api_examples.ipynb`
+- **Ausführliche Dokumentation:** `README.md`
+- **API-Beispiele:** `notebooks/webapp_api_examples.ipynb`
 - **Hauptprojekt:** `README.md`
 - **Original-Notebook:** `save_load_orch.ipynb`
 
@@ -167,8 +167,13 @@ with open('midis/fur-elise.mid', 'rb') as f:
 
 ## 📧 Support
 
-Bei Fragen oder Problemen, siehe `README_webapp.md` oder die Haupt-Dokumentation.
+Bei Fragen oder Problemen, siehe `README.md` oder die Haupt-Dokumentation.
 
 ---
 
 **Viel Erfolg mit AMO! 🎼**
+
+
+
+
+

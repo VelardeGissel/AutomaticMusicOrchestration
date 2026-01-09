@@ -11,17 +11,19 @@ import os
 import tempfile
 import unittest
 import mido
+from pathlib import Path
 
-# Add the amos directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'amos'))
-from midi2df2midi import midi_to_dataframe, save_midi_from_df
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = REPO_ROOT / "src"
+sys.path.insert(0, str(SRC_DIR))
+from amo.midi2df2midi import midi_to_dataframe, save_midi_from_df
 
 
 class TestMidiBijection(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.test_midi_path = "midis/sugar-plum-fairy_orch.mid"
+        self.test_midi_path = REPO_ROOT / "data" / "samples" / "midis" / "sugar-plum-fairy_orch.mid"
         self.temp_dir = tempfile.mkdtemp()
         
     def test_track_channel_preservation(self):

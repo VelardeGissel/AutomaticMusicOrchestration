@@ -37,9 +37,9 @@ MUSESCORE_EXECUTABLE = "/Applications/MuseScore 4.app/Contents/MacOS/mscore"
 #MUSESCORE_EXECUTABLE = "/Applications/MuseScore 4/Contents/MacOS/mscore"
 
 #Example of use
-#midi_file='midis/sugar-plum-fairy_orch.mid'
-#output_xml='midis/sugar-plum-fairy_orchB.xml'
-#output_file='midis/sugar-plum-fairy_orch_xmlB.mid'
+#midi_file='data/samples/midis/sugar-plum-fairy_orch.mid'
+#output_xml='runtime/outputs/sugar-plum-fairy_orchB.xml'
+#output_file='runtime/outputs/sugar-plum-fairy_orch_xmlB.mid'
 #convert_midi_to_musicxml(midi_file, output_xml)
 #convert_musicxml_to_midi(output_xml, output_file)
 

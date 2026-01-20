@@ -52,6 +52,25 @@ def learn_quaterna_mapping(nmat,ytarget="track-channel"):
             if track_info not in mapping[label]:
                 mapping[label].append(track_info)
         return mapping
+    if ytarget=="instrument-name":
+        # Extract the first 4 columns
+        first_four = nmat[:, :4]
+
+        # 1. Unique values based ONLY on column 2 (track name)
+        col2 = first_four[:, 1]
+        unique_col2, indices = np.unique(col2, return_index=True)
+
+        # 2. First column: ascending order (track number)
+        col1_new = np.arange(1, len(unique_col2) + 1)
+
+        # 3. Third column: all ones (channel)
+        col3_new = np.ones(len(unique_col2), dtype=first_four.dtype)
+
+        # 4. Fourth column: pick original corresponding value
+        col4_new = first_four[indices, 3]
+
+        # Build the final mapping array
+        mapping = np.column_stack([col1_new, unique_col2, col3_new, col4_new])
     else:
         """
         When target is track-channel
@@ -146,6 +165,16 @@ def fill_quaterna_columns(y, map_array, ytarget="track-channel"):
                 filled.append([np.nan, np.nan, np.nan])
         nmat_L_list = np.concatenate((np.array(filled), y.reshape(-1, 1)), axis=1)
         return nmat_L_list
+    elif ytarget == "instrument-name":
+        row_map = {}
+        for row in map_array:
+            key = row[1]
+            if key not in row_map:
+                row_map[key] = row
+        
+        # Use a list comprehension to build the new array based on the strings in y
+        nmat_L_list = [row_map[key] for key in y]
+        nmat_L_list =  np.array(nmat_L_list, dtype=object)
     else:
         """
         Generates a NumPy array (nmat_L) from a list of strings (y) by mapping

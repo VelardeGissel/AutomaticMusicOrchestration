@@ -189,6 +189,6 @@ def save_midi_from_df(df, output_path, ticks_per_beat=480):
 # In[3]:
 
 
-#df = midi_to_dataframe('midis/sugar-plum-fairy_orch.mid')#violin_flute.mid')#sugar-plum-fairy_orch.mid')
-#save_midi_from_df(df, 'midis/output1.mid')
+#df = midi_to_dataframe('data/samples/midis/sugar-plum-fairy_orch.mid')#violin_flute.mid')#sugar-plum-fairy_orch.mid')
+#save_midi_from_df(df, 'runtime/outputs/output1.mid')
 

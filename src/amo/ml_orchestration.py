@@ -298,7 +298,7 @@ def split_and_encode(X, y, test_size=0.2, random_state=42):
     if test_size > 0:
         y_test = np.array([y if y in le.classes_ else "UNKNOWN" for y in y_test])
         le.classes_ = np.append(le.classes_, ["UNKNOWN"])
-        print(f"Number of unknown classes in test set: {sum(y_test == "UNKNOWN")} of {test_size}")
+        print(f"Number of unknown classes in test set: {sum(y_test == 'UNKNOWN')} of {test_size}")
         y_test = le.transform(y_test)
     return X_train, X_test, y_train, y_test, le
 

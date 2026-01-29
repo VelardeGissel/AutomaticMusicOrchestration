@@ -298,7 +298,8 @@ def split_and_encode(X, y, test_size=0.2, random_state=42):
     if test_size > 0:
         y_test = np.array([y if y in le.classes_ else "UNKNOWN" for y in y_test])
         le.classes_ = np.append(le.classes_, ["UNKNOWN"])
-        print(f"Number of unknown classes in test set: {sum(y_test == 'UNKNOWN')} of {test_size}")
+        #TypeError: 'bool' object is not iterable. Commented 28.1.2026
+        #print(f"Number of unknown classes in test set: {sum(y_test == 'UNKNOWN')} of {test_size}")
         y_test = le.transform(y_test)
     return X_train, X_test, y_train, y_test, le
 
@@ -1346,7 +1347,7 @@ def expand_estimated_transform(df, transformations=None):
     df_expanded = pd.DataFrame(expanded_rows).reset_index(drop=True)
     return df_expanded
 
-def amo_with_doublings_multiclass(filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
+def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
     """
     GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025 + FM 09.12.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
@@ -1585,8 +1586,10 @@ def amo_with_doublings_multiclass(filein=None, fileout=None, ytarget="track-chan
                 print(dfnmat_reduced[yexptarget].value_counts(normalize=True))
             if 'train_all' in pipeline_path:
                 transform_joblib_path = f"models/weights/train_all_{model}_{yexptarget}.joblib"
+                transform_joblib_path = model_path + transform_joblib_path
             else:
                 transform_joblib_path = f"models/weights/{model}_{yexptarget}.joblib"
+                transform_joblib_path = model_path + transform_joblib_path
             if filein is not None:
                 transform_metrics = estimate_transform(dfnmat_reduced, ytarget=yexptarget, model=model, pipeline_path=transform_joblib_path)
                 metrics.update(transform_metrics)

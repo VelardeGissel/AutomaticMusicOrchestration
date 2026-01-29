@@ -304,7 +304,7 @@ def split_and_encode(X, y, test_size=0.2, random_state=42):
     return X_train, X_test, y_train, y_test, le
 
 
-def save_midi_from_df_with_timing(df, output_path, reference_midi_path=None, ticks_per_beat=480):
+def save_midi_from_df_with_timing(df, output_path, reference_midi_path=None, ticks_per_beat=480,printpath=False):
     """
     Enhanced MIDI saving that preserves musical structure from reference file.
     CORRECTED VERSION: Adds only ONE time signature to avoid conflicts.
@@ -414,7 +414,8 @@ def save_midi_from_df_with_timing(df, output_path, reference_midi_path=None, tic
         mid.tracks.append(track)
     
     mid.save(output_path)
-    print(f"Saved {output_path} with preserved musical structure")
+    if printpath==True:
+        print(f"Saved {output_path} with preserved musical structure")
 
 
 # === Main ML Orchestration Functions ===
@@ -476,7 +477,10 @@ def ml_exp(filein, fileout, ytarget="track-channel"):
     )
     nmat2 = dfnmat.to_numpy()
     X2 = nmat2[:,4:8] #onset, duration, pitch, velocity
-    print("Number of events in", fileout, ":", X2.shape[0])
+    if printpath==True:
+        print("Number of events in", fileout, ":", X2.shape[0]) #avoid printing the full path
+    else:
+        print("Number of events in fileout: ", X2.shape[0])
     print("last onset at ", X2[X2.shape[0]-1,0])
     
     # Partition the dataset
@@ -526,7 +530,7 @@ def ml_exp(filein, fileout, ytarget="track-channel"):
         save_midi_from_df(dfdata, filename)
 
 
-def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
+def ml_exp_with_timing(filein, fileout, ytarget="track-channel",printpath=False):
     """
     Enhanced ML orchestration function that preserves time signatures and tempo.
     """
@@ -561,7 +565,8 @@ def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
     classifiers = [clf for clf in classifiers if clf is not None]
     
     # Load and process source file
-    print(f"Learning orchestration style from: {filein}")
+    if printpath==True:
+        print(f"Learning orchestration style from: {filein}") #avoid printing the full path
     dfnmat = midi_to_dataframe(filein)
     dfnmat = dfnmat.sort_values(
         ['onset in quarter notes','duration in quarter notes', 'track number'],
@@ -573,11 +578,15 @@ def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
     
     X, y = defineXy(nmat, ytarget)
     print("Labels", np.unique(y))
-    print("Number of events in", filein, ":", X.shape[0])
+    if printpath==True:
+        print("Number of events in", filein, ":", X.shape[0]) #avoid printing the full path
+    else:
+        print("Number of events in filein: ", X.shape[0])
     print("Last onset at", X[X.shape[0]-1, 0])
     
     # Load and process target file
-    print(f"\\nProcessing target file: {fileout}")
+    #print(f"\\nProcessing target file: {fileout}")
+    print(f"\\nProcessing target file: fileout")
     dfnmat2 = midi_to_dataframe(fileout) 
     dfnmat2 = dfnmat2.sort_values(
         ['onset in quarter notes','duration in quarter notes', 'track number'],
@@ -585,7 +594,10 @@ def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
     )
     nmat2 = dfnmat2.to_numpy()
     X2 = nmat2[:,4:8] #onset, duration, pitch, velocity
-    print("Number of events in", fileout, ":", X2.shape[0])
+    if printpath==True:
+        print("Number of events in", fileout, ":", X2.shape[0]) #avoid printing the full path
+    else:
+        print("Number of events in fileout: ", X2.shape[0])
     print("Last onset at", X2[X2.shape[0]-1,0])
     
     # Get original ticks_per_beat for precise timing
@@ -640,7 +652,8 @@ def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
         # Save with preserved musical structure
         extensions = name + "_WITH_TIMING.mid"
         filename = fileout.replace(".mid", extensions)
-        print('Orchestration with preserved structure:', filename)
+        if printpath==True:
+            print('Orchestration with preserved structure:', filename)
         
         # Use EXACT timing preservation function that preserves ALL timing events
         save_midi_with_exact_timing_structure(dfdata, filename, 
@@ -649,14 +662,15 @@ def ml_exp_with_timing(filein, fileout, ytarget="track-channel"):
 
 # === Advanced Timing Preservation Functions ===
 
-def extract_timing_structure(reference_midi_path):
+def extract_timing_structure(reference_midi_path,printpath=False):
     """
     Extract the complete timing structure from a reference MIDI file.
     Returns a list of timing events with their absolute positions.
     """
     try:
         ref_mid = mido.MidiFile(reference_midi_path)
-        print(f"Extracting timing structure from {reference_midi_path}")
+        if printpath==True:
+            print(f"Extracting timing structure from {reference_midi_path}")
         print(f"ticks_per_beat: {ref_mid.ticks_per_beat}")
         
         timing_events = []
@@ -856,7 +870,7 @@ def transpose_key_signature(key_sig, semitones):
 
 
 
-def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, target_ticks_per_beat=None):
+def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, target_ticks_per_beat=None,printpath=False):
     """
     Save MIDI with EXACT timing structure preserved from reference file.
     This preserves all time signature, tempo, and key signature changes at their correct positions.
@@ -864,7 +878,7 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
     print(f"\n=== SAVING WITH EXACT TIMING STRUCTURE ===")
     
     # Extract timing structure from reference
-    timing_events, ref_ticks_per_beat = extract_timing_structure(reference_midi_path)
+    timing_events, ref_ticks_per_beat = extract_timing_structure(reference_midi_path,printpath)
     
     # Use target ticks_per_beat if specified, otherwise use reference
     if target_ticks_per_beat is None:
@@ -1023,7 +1037,8 @@ def save_midi_with_exact_timing_structure(df, output_path, reference_midi_path, 
     
     # Save the file
     mid.save(output_path)
-    print(f"✅ Saved {output_path} with exact timing structure preserved")
+    if printpath==True:
+        print(f"✅ Saved {output_path} with exact timing structure preserved")
     print(f"   - {len(timing_events)} timing events preserved")
     print(f"   - {len(note_tracks)} instrument tracks created")
     print(f"   - Key signatures fixed for MuseScore compatibility")
@@ -1085,7 +1100,7 @@ def reduce_df_with_transform(df, tol=1.0, transformations=None):
 
     return df_reduced
 
-def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoost", pipeline_path=""):
+def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoost", pipeline_path="", printpath=False):
     """
     FM
     """
@@ -1225,7 +1240,8 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
             }
 
         joblib.dump(artifact, pipeline_path)
-        print(f"Pipeline saved: {pipeline_path}")
+        if printpath==True:
+            print(f"Pipeline saved: {pipeline_path}")
 
     return transform_metrics
     #
@@ -1347,7 +1363,7 @@ def expand_estimated_transform(df, transformations=None):
     df_expanded = pd.DataFrame(expanded_rows).reset_index(drop=True)
     return df_expanded
 
-def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True):
+def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True,printpath=False):
     """
     GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025 + FM 09.12.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
@@ -1413,10 +1429,12 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
         print(f"No input files for training.")
     else:
         if isinstance(filein, list):
-            print(f"Learning orchestration style from {len(filein)} files")
+            if printpath==True:
+                print(f"Learning orchestration style from {len(filein)} files")
             cache_filein = str(filein)
         else:
-            print(f"Learning orchestration style from: {filein}")
+            if printpath==True:
+                print(f"Learning orchestration style from: {filein}") #avoid printing the full path
             cache_filein = filein
     
         print("\n========= PREPROCESSING =========")
@@ -1557,7 +1575,8 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
 
     if fileout:
         # Load and process target file
-        print(f"\nProcessing target file: {fileout}")
+        if printpath==True:
+            print(f"\nProcessing target file fileout {fileout}")
         dfnmat2 = midi_to_dataframe(fileout)
         dfnmat2 = dfnmat2.sort_values(
             ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -1565,7 +1584,10 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
         )
         nmat2 = dfnmat2.to_numpy()
         X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
-        print("Number of events in", fileout, ":", X2.shape[0])
+        if printpath==True:
+            print("Number of events in", fileout, ":", X2.shape[0]) #avoid printing the full path
+        else:
+            print("Number of events in fileout: ", X2.shape[0])
         print("Last onset at", X2[X2.shape[0] - 1, 0])
         
         # Get original ticks_per_beat for precise timing
@@ -1614,7 +1636,10 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
         )
         nmat2 = dfnmat2.to_numpy()
         X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
-        print("Number of events in", fileout, ":", X2.shape[0])
+        if printpath==True:
+            print("Number of events in", fileout, ":", X2.shape[0]) #avoid printing the full path
+        else:
+            print("Number of events in fileout: ", X2.shape[0])
         print("Last onset at", X2[X2.shape[0] - 1, 0])
 
         print("\n========= PREDICTION (target file) =========")
@@ -1666,7 +1691,8 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
         trainall_suffix = "_TRAIN_ALL" if 'train_all' in pipeline_path else ""
         suffixes = f"_{clf_name}_WITH_TIMING{transform_suffix}{multiclass_suffix}{trainall_suffix}.mid"
         filename = fileout.replace(".mid", suffixes)
-        print('Orchestration with preserved structure:', filename)
+        if printpath==True:
+            print('Orchestration with preserved structure:', filename)
         
         # Use the exact timing preservation function
         save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
@@ -1684,23 +1710,24 @@ def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarg
         else:
             artifact["label_encoder"] = le_f
         joblib.dump(artifact, pipeline_path)
-        print(f"Final pipeline saved: {pipeline_path}")
+        if printpath==True:
+            print(f"Final pipeline saved: {pipeline_path}")
 
     return metrics
 
-def preprocessing(filein, ytarget, tol, transformations, multiclass):
+def preprocessing(filein, ytarget, tol, transformations, multiclass, printpath=False):
     if isinstance(filein, list):
         # TODO: Modify so that the train-test split happens at file level
         dfs = []
         nmats = []
         for f_in in filein:
-            nmt, df_red = midi_to_transformed_datasets(f_in, ytarget, tol, transformations)
+            nmt, df_red = midi_to_transformed_datasets(f_in, ytarget, tol, transformations, printpath)
             dfs.append(df_red)
             nmats.append(nmt)
         dfnmat_reduced = pd.concat(dfs, ignore_index=True)
         nmat = np.concatenate(nmats, axis=0)
     else:
-        nmat, dfnmat_reduced = midi_to_transformed_datasets(filein, ytarget, tol, transformations)
+        nmat, dfnmat_reduced = midi_to_transformed_datasets(filein, ytarget, tol, transformations, printpath)
 
     # Get mapping from the grouped data
     mapping = learn_quaterna_mapping(nmat, ytarget)
@@ -1712,7 +1739,10 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
         X, y_multihot, all_classes, mlb = defineXy_multihot(nmat, ytarget)
         print("Number of classes:", len(all_classes))
         print("Classes:", all_classes)
-        print("Number of events in", filein, ":", X.shape[0])
+        if printpath==True:
+            print("Number of events in", filein, ":", X.shape[0]) #avoid printing the full path
+        else:
+            print("Number of events in filein: ", X.shape[0])
         print("Last onset at", X[X.shape[0] - 1, 0])
         print(y_multihot)
         print(np.sum(y_multihot,axis=1))
@@ -1730,7 +1760,10 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
         print("\nDefine covariates and target variable. Target variable encoding")
         X, y = defineXy(nmat, ytarget)
         print("Labels", np.unique(y))
-        print("Number of events in", filein, ":", X.shape[0])
+        if printpath==True:
+            print("Number of events in", filein, ":", X.shape[0]) #avoid printing the full path
+        else:
+            print("Number of events in filein: ", X.shape[0])
         print("Last onset at", X[X.shape[0] - 1, 0])
 
         # Partition the dataset
@@ -1740,7 +1773,7 @@ def preprocessing(filein, ytarget, tol, transformations, multiclass):
         all_classes, mlb = None, None
     return mapping,dfnmat_reduced,all_classes,mlb,X_train,X_test,y_train,y_test,X_train_f,y_train_f,le_f
 
-def midi_to_transformed_datasets(filein, ytarget, tol, transformations):
+def midi_to_transformed_datasets(filein, ytarget, tol, transformations,printpath=False):
     dfnmat = midi_to_dataframe(filein) 
     dfnmat = dfnmat.sort_values(
             ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -1754,7 +1787,8 @@ def midi_to_transformed_datasets(filein, ytarget, tol, transformations):
 
         # Build dfreduced
     if transformations:
-        print(f"\nBuilding reduced dataset with transformations. {filein}")
+        if printpath==True:
+            print(f"\nBuilding reduced dataset with transformations. {filein}") 
         dfnmat_reduced = reduce_df_with_transform(dfnmat, tol=tol, transformations=transformations)
     else:
         dfnmat_reduced = dfnmat
@@ -1978,7 +2012,7 @@ def multihot_clf_predict(X2, mlb, model, mapping, ytarget):
     return nmat_expanded
 
 
-def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path=""):
+def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path="",printpath=False):
     """
     GV with Gemini. 19.9.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
@@ -2022,7 +2056,8 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path
     clf = classifiers_map[clf_name]
 
     # Load and process source file
-    print(f"Learning orchestration style from: {filein}")
+    if printpath==True:
+        print(f"Learning orchestration style from: {filein}") #avoid printing the full path
     dfnmat = midi_to_dataframe(filein)
     dfnmat = dfnmat.sort_values(
         ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -2034,11 +2069,15 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path
     
     X, y = defineXy(nmat, ytarget)
     print("Labels", np.unique(y))
-    print("Number of events in", filein, ":", X.shape[0])
+    if printpath==True:
+        print("Number of events in", filein, ":", X.shape[0]) #avoid printing the full path
+    else:
+        print("Number of events in filein: ", X.shape[0])
     print("Last onset at", X[X.shape[0] - 1, 0])
     
     # Load and process target file
-    print(f"\nProcessing target file: {fileout}")
+    if printpath==True:
+        print(f"\nProcessing target file {fileout}")
     dfnmat2 = midi_to_dataframe(fileout)
     dfnmat2 = dfnmat2.sort_values(
         ['onset in quarter notes', 'duration in quarter notes', 'track number'],
@@ -2046,7 +2085,10 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path
     )
     nmat2 = dfnmat2.to_numpy()
     X2 = nmat2[:, 4:8]  # onset, duration, pitch, velocity
-    print("Number of events in", fileout, ":", X2.shape[0])
+    if printpath==True:
+        print("Number of events in", fileout, ":", X2.shape[0]) #avoid printing the full path
+    else:
+        print("Number of events in fileout: ", X2.shape[0])
     print("Last onset at", X2[X2.shape[0] - 1, 0])
     
     # Get original ticks_per_beat for precise timing
@@ -2100,7 +2142,8 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path
     # Save with preserved musical structure
     extensions = f"{clf_name}_WITH_TIMING.mid"
     filename = fileout.replace(".mid", extensions)
-    print('Orchestration with preserved structure:', filename)
+    if printpath==True:
+        print('Orchestration with preserved structure:', filename)
     
     # Use the exact timing preservation function
     save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileout)
@@ -2115,7 +2158,8 @@ def amo(filein, fileout, ytarget="track-channel", model="XGBoost", pipeline_path
             }
 
         joblib.dump(artifact, pipeline_path)
-        print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}")
+        if printpath==True:
+            print(f"[AMO-XGB SAVE] Pipeline saved: {pipeline_path}") #avoid printing full path
     #
 
 def amo_load_and_orchestrate(

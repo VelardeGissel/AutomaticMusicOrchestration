@@ -1363,8 +1363,9 @@ def expand_estimated_transform(df, transformations=None):
     df_expanded = pd.DataFrame(expanded_rows).reset_index(drop=True)
     return df_expanded
 
-def amo_with_doublings_multiclass(model_path="",filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True,printpath=False):
+def amo_with_doublings_multiclass(filein=None, fileout=None, ytarget="track-channel", model="XGBoost", pipeline_path="", tol=0.2, transformations=None, multiclass=True, model_path="", printpath=False):
     """
+    3.Feb.2026 added:  model_path="", printpath=False
     GV with Gemini. 19.9.2025 + FM 23.10.2025 + FM with Claude 05.11.2025 + FM 09.12.2025
     Automated Music Orchestration function that orchestrates a target MIDI file
     using a single specified machine learning model and preserves musical structure.

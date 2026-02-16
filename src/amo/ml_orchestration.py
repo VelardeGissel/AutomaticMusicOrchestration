@@ -2349,3 +2349,69 @@ def clf_predict_back(X, y, le, mapping, ytarget):
     print("Predictions map", np.unique(y_pred_orig))
     nmat = np.concatenate((new_cols, X), axis=1)
     return nmat
+
+'''
+Promp GV 16.2.2026
+ChatGPT
+given X_train,  X_test, y_train,  y_test = split_ts(X, y, test_size=0.2), with labels 1 to n,
+create a function for forecasting where there is 1 model for each label instead of a model for all labels.
+#single model for all
+clf = XGBClassifier()#(tree_method="hist")
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+score = clf.score(X_test, y_test)
+print("Accuracy test: %.2f%%" % (score * 100.0))
+print('Accuracy train %.2f%%',% (clf.score(X_train, y_train)*100))
+'''
+def fit_one_model_per_label(X_train, y_train, classes=None, **xgb_kwargs):
+    """
+    Promp GV 16.2.2026
+    ChatGPT
+    Train 1 binary model per label (one-vs-rest).
+    Returns a dict {label: model_or_None} and the class list used.
+    """
+    X_train = np.asarray(X_train)
+    y_train = np.asarray(y_train)
+
+    if classes is None:
+        classes = np.unique(y_train)
+    classes = np.asarray(classes)
+
+    models = {}
+    for c in classes:
+        y_bin = (y_train == c).astype(int)
+
+        # If a class is missing (or always present) in train, XGBoost can't learn it
+        if y_bin.sum() == 0 or y_bin.sum() == len(y_bin):
+            models[c] = None
+            continue
+
+        m = XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            **xgb_kwargs
+        )
+        m.fit(X_train, y_bin)
+        models[c] = m
+
+    return models, classes
+
+#Promp GV 16.2.2026
+def predict_one_model_per_label(models, classes, X):
+    """
+    Predict by running each label's binary model to get P(class=label),
+    then pick the label with highest probability.
+    """
+    X = np.asarray(X)
+    classes = np.asarray(classes)
+
+    proba = np.zeros((X.shape[0], len(classes)), dtype=float)
+    for j, c in enumerate(classes):
+        m = models.get(c, None)
+        if m is None:
+            proba[:, j] = 0.0
+        else:
+            proba[:, j] = m.predict_proba(X)[:, 1]
+
+    y_pred = classes[np.argmax(proba, axis=1)]
+    return y_pred, proba

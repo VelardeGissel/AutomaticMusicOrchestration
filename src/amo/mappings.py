@@ -1,4 +1,9 @@
+#import numpy as np
+from __future__ import annotations
+
 import numpy as np
+import mido
+from mido import MidiFile, MidiTrack, MetaMessage, Message
 """
 gpt-5
 text.format: text
@@ -204,3 +209,176 @@ def fill_quaterna_columns(y, map_array, ytarget="track-channel"):
         nmat_L_list =  np.array(nmat_L_list, dtype=object)
     # Convert the list of arrays into a single NumPy array
     return nmat_L_list
+
+### 16.2.2026
+'''
+Prompt by GV. in Chat-GPT
+given a midi file, create a python function to re-order how the instruments are presented in musescore based on mapping. if an instrument is not present in the midi file but present in mapping, do not show it.
+for example, mapping for a given file has the following information:
+
+array([[1, 'Flauti', 0, 73],
+[2, 'Oboi', 1, 68],
+[3, 'Clarinetti B', 2, 71],
+[4, 'Fagotti', 3, 70],
+[5, 'Corni C', 4, 60],
+[6, 'Trombe C', 5, 56],
+[7, 'Timpani', 6, 47],
+[8, 'Violini I.', 11, 48],
+[9, 'Violini II.', 12, 48],
+[10, 'Viole ', 13, 45],
+[10, 'Viole ', 13, 48],
+[11, 'Celli', 14, 48],
+[11, 'Celli', 14, 45],
+[12, 'Contrabassi', 15, 48],
+[12, 'Contrabassi', 15, 45]], dtype=object)
+'''
+#from __future__ import annotations
+
+#import numpy as np
+#import mido
+#from mido import MidiFile, MidiTrack, MetaMessage, Message
+
+
+def reorder_midi_for_musescore(
+    midi_in: str,
+    midi_out: str,
+    mapping,
+    require_notes: bool = True,
+):
+    """
+    Reorder instruments (tracks) as they appear when importing the MIDI into MuseScore,
+    based on a mapping table.
+
+    The function:
+      - Detects which MIDI channels are present in the file
+      - Keeps ONLY channels present in the MIDI (even if mapping contains more)
+      - Rebuilds a Type-1 MIDI with:
+          Track 0: global meta (tempo/time signature/etc.)
+          Track 1..N: one track per channel, in mapping order
+
+    Parameters
+    ----------
+    midi_in, midi_out : str
+        Input/output MIDI file paths.
+    mapping : array-like shape (k,4)
+        Rows like: [order, display_name, channel, program]
+        Example:
+            [1, 'Flauti', 0, 73]
+            [2, 'Oboi', 1, 68]
+            ...
+        Channel is 0-15 MIDI channel index.
+        Program is GM program number *as you store it*; this function assumes 0-127.
+        If your mapping uses 1-128, subtract 1 before calling.
+    require_notes : bool
+        If True, a channel is considered "present" only if it has note_on/note_off.
+        If False, program_change-only channels are also kept.
+
+    Returns
+    -------
+    kept_channels : list[int]
+        Channels that were kept (in final order).
+    """
+    mapping = np.asarray(mapping, dtype=object)
+    if mapping.ndim != 2 or mapping.shape[1] < 4:
+        raise ValueError("mapping must be a 2D array with columns [order, name, channel, program].")
+
+    # ---- 1) Build ordered, de-duplicated channel plan from mapping ----
+    # mapping columns: 0=order, 1=name, 2=channel, 3=program
+    rows = []
+    for r in mapping:
+        order = int(r[0])
+        name = str(r[1])
+        ch = int(r[2])
+        prog = int(r[3])
+        rows.append((order, name, ch, prog))
+
+    # Sort by desired order; if duplicates for same channel exist, keep the first
+    rows.sort(key=lambda x: x[0])
+    seen = set()
+    plan = []
+    for order, name, ch, prog in rows:
+        if ch in seen:
+            continue
+        seen.add(ch)
+        plan.append((order, name, ch, prog))
+
+    # ---- 2) Parse MIDI and detect channels actually present ----
+    mid = MidiFile(midi_in)
+    merged = mido.merge_tracks(mid.tracks)
+
+    present_channels = set()
+    note_channels = set()
+
+    for msg in merged:
+        if msg.is_meta:
+            continue
+        if hasattr(msg, "channel"):
+            present_channels.add(msg.channel)
+            if msg.type in ("note_on", "note_off"):
+                # note_on with vel 0 is effectively note_off; still counts as note event
+                note_channels.add(msg.channel)
+
+    if require_notes:
+        present = note_channels
+    else:
+        present = present_channels
+
+    # Keep only channels that are both in mapping and present in MIDI
+    kept_plan = [(order, name, ch, prog) for (order, name, ch, prog) in plan if ch in present]
+    kept_channels = [ch for _, _, ch, _ in kept_plan]
+
+    # ---- 3) Collect events with absolute tick times (split by channel) ----
+    meta_events = []  # (abs_time, msg)
+    chan_events = {ch: [] for ch in kept_channels}  # ch -> list[(abs_time, msg)]
+
+    abs_t = 0
+    for msg in merged:
+        abs_t += msg.time
+        if msg.is_meta:
+            # keep global meta in track 0
+            # (skip track_name/end_of_track; we'll add our own end_of_track)
+            if msg.type not in ("track_name", "end_of_track"):
+                meta_events.append((abs_t, msg.copy(time=0)))
+        else:
+            if hasattr(msg, "channel") and msg.channel in chan_events:
+                chan_events[msg.channel].append((abs_t, msg.copy(time=0)))
+
+    # ---- 4) Build output MIDI: track 0 meta + ordered per-channel tracks ----
+    out = MidiFile(type=1, ticks_per_beat=mid.ticks_per_beat)
+
+    # Track 0: meta
+    meta_track = MidiTrack()
+    out.tracks.append(meta_track)
+
+    meta_events.sort(key=lambda x: x[0])
+    prev = 0
+    for t, msg in meta_events:
+        dm = msg.copy(time=t - prev)
+        meta_track.append(dm)
+        prev = t
+    meta_track.append(MetaMessage("end_of_track", time=0))
+
+    # One track per kept channel, in mapping order
+    for _, name, ch, prog in kept_plan:
+        tr = MidiTrack()
+        out.tracks.append(tr)
+
+        # Track name at time 0 (helps MuseScore staff names)
+        tr.append(MetaMessage("track_name", name=name, time=0))
+
+        # Ensure program at time 0 (if you want mapping to define instruments)
+        tr.append(Message("program_change", channel=ch, program=int(prog), time=0))
+
+        ev = chan_events[ch]
+        ev.sort(key=lambda x: x[0])
+
+        prev = 0
+        for t, msg in ev:
+            tr.append(msg.copy(time=t - prev))
+            prev = t
+
+        tr.append(MetaMessage("end_of_track", time=0))
+
+    out.save(midi_out)
+    return kept_channels
+### 16.2.2026

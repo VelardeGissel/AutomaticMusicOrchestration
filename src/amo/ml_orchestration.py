@@ -2268,3 +2268,84 @@ def amo_load_and_orchestrate(
     )
 
     return output_midi_path
+
+def split_tvt_ts(X, y, test_size=0.1):
+    #GV 13.2
+    #Split considering 80,10,10
+    """Split data."""
+    #print("First onset at", X[0, 0])
+    #print("Last onset at", X[X.shape[0] - 1, 0])
+    if test_size > 0:
+        n = X.shape[0] #number of samples
+        train_end = int(n * 0.80)
+        val_end   = int(n * 0.90)  # 80% + 10%
+        X_train = X[:train_end,:]
+        X_val   = X[train_end:val_end,:]
+        X_test  = X[val_end:,:]
+        y_train = y[:train_end]
+        y_val   = y[train_end:val_end]
+        y_test  = y[val_end:]
+    elif test_size == 0:
+        X_train = X
+        y_train = y
+        X_test, y_test = 0, 0  # We will not use X_test, y_test for inference        
+    print("Partition 80/10/10.")
+    print("Labels training:", np.unique(y_train))
+    print("Labels validation:", np.unique(y_val))
+    print("Labels test:", np.unique(y_test))
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+def split_ts(X, y, test_size=0.2):
+    #GV 13.2
+    #Split considering 80,20 as default
+    """Split data."""
+    if test_size > 0:
+        n = X.shape[0] #number of samples
+        train_end = int(n * (1 - test_size))
+        X_train = X[:train_end,:]
+        X_test  = X[train_end:,:]
+        y_train = y[:train_end]
+        y_test  = y[train_end:]
+    elif test_size == 0:
+        X_train = X
+        y_train = y
+        X_test, y_test = 0, 0  # We will not use X_test, y_test for inference        
+    print("Labels training:", np.unique(y_train))
+    print("Labels test:", np.unique(y_test))
+    return X_train, X_test, y_train, y_test
+
+#X2 (n,4) y2 array([6, 7, 6, ..., 7, 6, 7])
+def Xy_to_midi(X, y, mapping, le, filename, fileref, ytarget="track-channel"): 
+    #GV 16.2.2026
+    X=clf_predict_back(X, y, le, mapping, ytarget)
+    # Convert to DataFrame
+    # Get original ticks_per_beat for precise timing
+    
+    dfdata = pd.DataFrame(X, columns=[
+        'track number', 'track name', 'channel', 'program',
+        'onset in quarter notes', 'duration in quarter notes', 'pitch', 'velocity'
+    ])
+    
+    # Fix data types
+    dfdata['track number'] = dfdata['track number'].astype(int)
+    dfdata['channel'] = dfdata['channel'].astype(int)
+    dfdata['program'] = dfdata['program'].astype(int)
+    dfdata['pitch'] = dfdata['pitch'].astype(int)
+    dfdata['velocity'] = dfdata['velocity'].astype(int)
+    dfdata['onset in quarter notes'] = dfdata['onset in quarter notes'].astype(float)
+    dfdata['duration in quarter notes'] = dfdata['duration in quarter notes'].astype(float)
+    dfdata['track name'] = dfdata['track name'].astype(str)
+    save_midi_with_exact_timing_structure(dfdata, filename, reference_midi_path=fileref)
+    #save_midi_from_df(dfdata, output_path, ticks_per_beat=480)
+
+def clf_predict_back(X, y, le, mapping, ytarget):
+    #GV 16.2.2026
+    #"""Predict orchestration using trained model."""
+    # inverse transform to obtained the original labels:
+    y_pred_orig = le.inverse_transform(y) #track_channel
+    # Fill columns track, track name, channel, program using the mapping
+    #fill_quaterna_columns(y, map_array, ytarget="track-channel"):
+    new_cols = fill_quaterna_columns(y_pred_orig, mapping, ytarget)
+    print("Predictions map", np.unique(y_pred_orig))
+    nmat = np.concatenate((new_cols, X), axis=1)
+    return nmat

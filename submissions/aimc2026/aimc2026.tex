@@ -27,6 +27,7 @@
 \usepackage{graphicx}       % figures
 \usepackage{cleveref}       % automatic figure references
 
+\usepackage{xcolor}
 \newcommand{\todo}[1]{\textcolor{blue}{\textbf{TODO}: #1}}
 \newcommand{\rev}[1]{\textcolor{blue}{REVIEW: << #1 >>}}
 \newcommand{\fm}[1]{\textcolor{magenta}{FM: << #1 >>}}
@@ -93,14 +94,13 @@
 \twocolumn[%
   \maketitle
   \begin{abstract}
-    The abstract paragraph should be indented 1.5~cm on both the left- and right-hand margins.
-    Use 10~point type, with a vertical spacing (leading) of 11~points.
-    The word \textbf{Abstract} must be centered, bold, and in point size 12. Two line spaces precede the abstract. The abstract
-    must be limited to one paragraph.
+    \draft{We present a symbolic automatic music orchestration method that learns an orchestration style from MIDI and transfers it to a target piano score. The baseline method formulates orchestration as note-wise supervised classification from note features (onset, duration, pitch, velocity) to an instrument label. We then extend this baseline in two directions. First, we introduce a doubling-aware preprocessing and postprocessing pipeline that compresses duplicated/transformed note events during training and reconstructs them at inference. Second, we introduce a multi-label extension in which each note can be assigned to multiple instruments using multi-hot targets and multi-output classification. The resulting framework supports both standard one-note/one-instrument orchestration and richer one-note/many-instruments textures.}
   \end{abstract}%
 ]
 
 \aimcnotice % name of proceedings title in the first column bottom
+
+\fm{Most of the text is now an ai-generated description of the repository. I need to rework most of it.}
 
 \section{Introduction}
 \label{sec:introduction}
@@ -109,6 +109,14 @@
 - What is orchestration
 \\
 - Orchestration is more than instrumentation and instrument estimation (but you need to start somewhere)
+}
+
+\draft{
+Automatic orchestration maps a symbolic score to an instrumental realization. In this work, we target MIDI-to-MIDI orchestration transfer: given an orchestral reference file (style source) and a piano target file, we predict orchestral assignments for each target note while preserving the target's temporal structure.
+}
+
+\draft{
+The core challenge is that orchestration is not always one-to-one. A pitch event may be realized by several instruments (doublings), and equivalent events may appear through transposition-like transformations. A plain single-label classifier cannot represent these behaviors directly. We therefore start from a simple supervised baseline and progressively add two capabilities: doubling-aware processing and multi-label prediction.
 }
 
 \section{State of the art}
@@ -123,13 +131,140 @@
 - Present Gissel's Orchestration by Example (ObyE): orchestrate by learning from a model example, use tabular data representation, avoid data-hungry methods and use tree-based classification. Highlight advantages. Highlight problems addressed here.
 }
 
+\draft{
+ObyE provided a lightweight method to estimate the instrumentation of a piece. It does not require large training datasets (only one example file) and it does not need long training times. This method however only allows to assign existing notes to instruments, and lacks the possibility of transforming the existing note content or creating new notes. This is a fundamental aspect of professional human orchestration, that heavily rely on "rewriting" rather then distributing the music content.
+}
+
 \section{Methods}
 
+\subsection{Data Representation}
 
+Each MIDI note event is represented as an 8-column row:
+\begin{displaymath}
+	[\mbox{track number}, \mbox{track name}, \mbox{channel}, \mbox{program}, \mbox{onset}, \mbox{duration}, \mbox{pitch}, \mbox{velocity}].
+\end{displaymath}
 
-\subsection{ObyE with multi-instrument and transpositions (Francesco)}
+For prediction, features are:
+\begin{displaymath}
+\mathbf{x} = (\mbox{onset}, \mbox{duration}, \mbox{pitch}, \mbox{velocity}).
+\end{displaymath}
+The label target is either:
+\begin{itemize}
+	\item \texttt{track-channel} (e.g., \texttt{"9\_13"}), or
+	\item \texttt{program} (MIDI program number).
+\end{itemize}
 
-ObyE provided a lightweight method to estimate the instrumentation of a piece. It does not require large training datasets (only one example file) and it does not need long training times. This method however only allows to assign existing notes to instruments, and lacks the possibility of transforming the existing note content or creating new notes. This is a fundamental aspect of professional human orchestration, that heavily rely on "rewriting" rather then distributing the music content.
+A mapping from predicted label back to full orchestral metadata is learned from training data (\emph{quaterna mapping}), enabling reconstruction of \texttt{track, track name, channel, program} after prediction.
+
+\subsection{Baseline AMO (No Doublings, No Multi-Label) (ObyE)}
+
+\subsubsection{Training}
+Given source orchestral MIDI:
+\begin{enumerate}
+	\item Convert MIDI to note matrix and sort by onset, duration, and track.
+	\item Learn label-to-metadata mapping from the first four columns.
+	\item Build feature matrix \(X\) and label vector \(y\).
+	\item Encode \(y\) with a label encoder.
+	\item Train a classifier \(f: X \to y\) (e.g., XGBoost, Random Forest, Decision Tree, KNN, MLP, Naive Bayes, AdaBoost).
+	\item Evaluate on held-out split; retrain on full data for final inference model.
+\end{enumerate}
+
+\subsubsection{Inference}
+Given target piano MIDI:
+\begin{enumerate}
+	\item Extract target features \(X^\star\).
+	\item Predict labels \(\hat{y}=f(X^\star)\).
+	\item Decode labels and reconstruct full metadata via mapping.
+	\item Concatenate metadata with original note features and write orchestrated MIDI.
+\end{enumerate}
+Timing and global musical structure are preserved from the target file in MIDI export.
+
+\subsection{Doubling-Aware Extension}
+
+\subsubsection{Reduction During Preprocessing}
+To model instrumental doublings, notes are grouped by key
+\[
+k=(\mbox{onset}, \mbox{pitch}),
+\]
+with duration tolerance \(\tau\). If two notes match under this criterion, one is kept as seed and the other is dropped; a \texttt{doubled} counter is incremented on the seed note. Optionally, user-defined transformations (e.g., transposition by fixed semitones) are also tested; matched transformed notes increment transformation-specific counters.
+
+This produces a reduced representation that captures:
+\begin{itemize}
+	\item direct duplicate density (\texttt{doubled}),
+	\item transformation-related density (one counter per transformation).
+\end{itemize}
+
+\subsubsection{Transformation Classification}
+For each transformation \(t_j\), a binary classifier is trained to predict whether that transformation should be applied to a target event. This is learned on reduced orchestral data and then applied to the target file.
+
+\subsubsection{Expansion During Inference}
+After transformation predictions:
+\begin{enumerate}
+	\item Duplicate seed notes according to \texttt{doubled}.
+	\item Recreate transformed notes using inverse transformation calls.
+\end{enumerate}
+This restores orchestral density before instrument assignment, allowing the model to reproduce style-specific doubling and transformation patterns.
+
+\subsection{Multi-Label (Multi-Hot) Extension}
+
+\subsubsection{Why Multi-Label}
+Baseline classification enforces one label per note. Real orchestration often requires several instruments on one note event. We therefore replace single-label targets with multi-hot vectors.
+
+\subsubsection{Target Construction}
+On source data, notes are reduced by \((\mbox{onset}, \mbox{pitch})\). For each reduced seed note \(i\), all associated instrument labels are aggregated:
+\[
+Y_i \subseteq \mathcal{C}.
+\]
+Using a \texttt{MultiLabelBinarizer}, each \(Y_i\) is converted to
+\[
+\mathbf{y}_i \in \{0,1\}^{|\mathcal{C}|}.
+\]
+
+\subsubsection{Model}
+A multi-output classifier is trained:
+\[
+F: \mathbf{x}_i \mapsto \mathbf{y}_i.
+\]
+Implementation uses \texttt{MultiOutputClassifier(base\_clf)}, i.e., one binary predictor per class dimension.
+
+\subsubsection{Inference}
+For each target note feature vector:
+\begin{enumerate}
+	\item Predict multi-hot activations.
+	\item Inverse-transform to active label set.
+	\item Duplicate the note once per active label.
+	\item Map each label back to full orchestral metadata.
+\end{enumerate}
+This directly enables one-note/many-instruments orchestration at prediction time.
+
+\section{Training and Inference Summary}
+
+\subsection{Training (Full System)}
+\begin{enumerate}
+	\item Parse source MIDI (or list of source MIDIs).
+	\item Optional reduction with doubling/transformation counters.
+	\item Build mapping for metadata reconstruction.
+	\item Either:
+	\begin{itemize}
+		\item single-label target (\texttt{multiclass=False}), or
+		\item multi-hot target (\texttt{multiclass=True}).
+	\end{itemize}
+	\item Train instrument classifier.
+	\item If transformations are enabled, train one classifier per transformation target.
+\end{enumerate}
+
+\subsection{Inference (Full System)}
+\begin{enumerate}
+	\item Parse target MIDI.
+	\item If transformations are enabled, predict transformation activations and expand target note list.
+	\item Predict instrument assignments:
+	\begin{itemize}
+		\item one label per note (single-label mode), or
+		\item multiple labels per note (multi-label mode, with note duplication).
+	\end{itemize}
+	\item Reconstruct full MIDI metadata from predicted labels.
+	\item Save orchestrated MIDI with preserved timing/meta structure.
+\end{enumerate}
 
 \todo{Francesco: Continue this description}
 
@@ -139,11 +274,30 @@ ObyE provided a lightweight method to estimate the instrumentation of a piece. I
 
 \todo{Francesco: how can we make this better now that we have a way to align the piano and orchestral pieces in the training dataset?}
 
+\section{What the Extensions Enable}
+
+\subsection{Baseline Capability}
+Baseline AMO learns a direct mapping from note features to one instrument label. It is simple and effective for monophonic assignment per event.
+
+\subsection{With Doublings}
+The model can represent and regenerate orchestral density patterns by learning where duplicate or transformed companion notes tend to occur.
+
+\subsection{With Multi-Label}
+The model can output several instruments for the same note event, enabling realistic doublings and thicker orchestral textures not possible in single-label mode.
+
+
 \section{Results}
 
 \fm{We are not completely happy with what comes out of the model but we find something interesting}
 
 \todo{Report the accuracy, precision, recall, f1 data and figure. Compare models}
+
+\draft{The approach is intentionally modular: baseline classification, doubling-aware reduction/expansion, and multi-label assignment can be enabled independently. This makes the framework usable as a plain orchestrator or as a richer texture-aware orchestrator depending on task requirements.
+}
+
+\draft{
+Potential limitations include note-wise independence, restricted feature set (no explicit harmonic context), and dependence on consistent label mapping in source files.
+}
 
 \section{Discussion}
 
@@ -159,7 +313,9 @@ ObyE provided a lightweight method to estimate the instrumentation of a piece. I
 
 \section{Conclusion}
 
-
+\draft{
+We described a supervised MIDI orchestration framework that progresses from a simple single-label baseline to a doubling-aware, multi-label system. The baseline handles direct note-to-instrument transfer; doubling-aware processing adds texture reconstruction; and multi-hot multi-output classification enables multiple simultaneous instrument assignments per note. Together, these components provide a practical and extensible pipeline for automatic symbolic orchestration.
+}
 
 \section*{Author Declarations}
 

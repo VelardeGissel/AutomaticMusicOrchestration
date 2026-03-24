@@ -4,3 +4,6 @@
 runtime/
 
 LOP_database_06_09_17
+
+plots/*.png
+*.joblib

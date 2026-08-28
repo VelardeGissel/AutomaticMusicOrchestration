@@ -1169,12 +1169,14 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
         transform_metrics[f'time ({ytarget})'] = np.nan
         transform_metrics[f'accuracy (train) ({ytarget})'] = np.nan
         transform_metrics[f'accuracy (test) ({ytarget})'] = np.nan
-        transform_metrics[f'precision (train) ({ytarget})'] = np.nan
-        transform_metrics[f'precision (test) ({ytarget})'] = np.nan
-        transform_metrics[f'recall (train) ({ytarget})'] = np.nan
-        transform_metrics[f'recall (test) ({ytarget})'] = np.nan
-        transform_metrics[f'f1 (train) ({ytarget})'] = np.nan
-        transform_metrics[f'f1 (test) ({ytarget})'] = np.nan
+        transform_metrics[f'precision macro (train) ({ytarget})'] = np.nan
+        transform_metrics[f'precision macro (test) ({ytarget})'] = np.nan
+        transform_metrics[f'recall macro (train) ({ytarget})'] = np.nan
+        transform_metrics[f'recall macro (test) ({ytarget})'] = np.nan
+        transform_metrics[f'f1 macro (train) ({ytarget})'] = np.nan
+        transform_metrics[f'f1 macro (test) ({ytarget})'] = np.nan
+        transform_metrics[f'f1 weighted (train) ({ytarget})'] = np.nan
+        transform_metrics[f'f1 weighted (test) ({ytarget})'] = np.nan
 
         return transform_metrics
     
@@ -1200,10 +1202,20 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     y_pred_test = clf_pipeline.predict(X_test)
     y_pred_train = clf_pipeline.predict(X_train)
     
-    # Calculate additional metrics using 'weighted' average for multiclass data
-    # 'Weighted' accounts for class imbalance by weighting the scores by the number of true instances for each label.
-    precision_test, recall_test, f1_test, _ = precision_recall_fscore_support(y_test, y_pred_test, average='weighted', zero_division=0)
-    precision_train, recall_train, f1_train, _ = precision_recall_fscore_support(y_train, y_pred_train, average='weighted', zero_division=0)
+    # Macro scores give every transformation class equal weight. Weighted F1 is
+    # retained separately to summarize performance according to class support.
+    precision_macro_test, recall_macro_test, f1_macro_test, _ = precision_recall_fscore_support(
+        y_test, y_pred_test, average='macro', zero_division=0
+    )
+    precision_macro_train, recall_macro_train, f1_macro_train, _ = precision_recall_fscore_support(
+        y_train, y_pred_train, average='macro', zero_division=0
+    )
+    _, _, f1_weighted_test, _ = precision_recall_fscore_support(
+        y_test, y_pred_test, average='weighted', zero_division=0
+    )
+    _, _, f1_weighted_train, _ = precision_recall_fscore_support(
+        y_train, y_pred_train, average='weighted', zero_division=0
+    )
     # Calculate the Confusion Matrix for single-class
     cm = confusion_matrix(y_test, y_pred_test)
     # --- NEW LINES END HERE ---
@@ -1217,15 +1229,18 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     print("Score on Test Set (20% split):", f"{score_test:.4f}")
 
     # --- NEW LINES START HERE ---
-    transform_metrics[f'precision (test) ({ytarget})'] = precision_test
-    transform_metrics[f'precision (train) ({ytarget})'] = precision_train
-    print("Precision (weighted):", f"{precision_test:.4f}")
-    transform_metrics[f'recall (test) ({ytarget})'] = recall_test
-    transform_metrics[f'recall (train) ({ytarget})'] = recall_train
-    print("Recall (weighted):", f"{recall_test:.4f}")
-    transform_metrics[f'f1 (test) ({ytarget})'] = f1_test
-    transform_metrics[f'f1 (train) ({ytarget})'] = f1_train
-    print("F1-Score (weighted):", f"{f1_test:.4f}")
+    transform_metrics[f'precision macro (test) ({ytarget})'] = precision_macro_test
+    transform_metrics[f'precision macro (train) ({ytarget})'] = precision_macro_train
+    print("Precision (macro):", f"{precision_macro_test:.4f}")
+    transform_metrics[f'recall macro (test) ({ytarget})'] = recall_macro_test
+    transform_metrics[f'recall macro (train) ({ytarget})'] = recall_macro_train
+    print("Recall (macro):", f"{recall_macro_test:.4f}")
+    transform_metrics[f'f1 macro (test) ({ytarget})'] = f1_macro_test
+    transform_metrics[f'f1 macro (train) ({ytarget})'] = f1_macro_train
+    print("F1-Score (macro):", f"{f1_macro_test:.4f}")
+    transform_metrics[f'f1 weighted (test) ({ytarget})'] = f1_weighted_test
+    transform_metrics[f'f1 weighted (train) ({ytarget})'] = f1_weighted_train
+    print("F1-Score (weighted):", f"{f1_weighted_test:.4f}")
 
     print("Confusion Matrix:\n", cm)
     # --- NEW LINES END HERE ---

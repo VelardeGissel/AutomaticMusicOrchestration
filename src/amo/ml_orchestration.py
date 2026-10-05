@@ -1166,6 +1166,11 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
 
     if len(np.unique(y)) == 1:
         print("Only one label in target variable")
+        transform_metrics[f'evaluation status ({ytarget})'] = 'single_class_skipped'
+        transform_metrics[f'class labels ({ytarget})'] = [str(label) for label in np.unique(y)]
+        transform_metrics[f'class support ({ytarget})'] = {
+            str(label): int(np.sum(y == label)) for label in np.unique(y)
+        }
         transform_metrics[f'time ({ytarget})'] = np.nan
         transform_metrics[f'accuracy (train) ({ytarget})'] = np.nan
         transform_metrics[f'accuracy (test) ({ytarget})'] = np.nan
@@ -1201,6 +1206,8 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     # Get predictions for metric calculation
     y_pred_test = clf_pipeline.predict(X_test)
     y_pred_train = clf_pipeline.predict(X_train)
+    class_labels = [str(label) for label in le.classes_]
+    label_indices = np.arange(len(class_labels))
     
     # Macro scores give every transformation class equal weight. Weighted F1 is
     # retained separately to summarize performance according to class support.
@@ -1217,7 +1224,8 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
         y_train, y_pred_train, average='weighted', zero_division=0
     )
     # Calculate the Confusion Matrix for single-class
-    cm = confusion_matrix(y_test, y_pred_test)
+    cm_test = confusion_matrix(y_test, y_pred_test, labels=label_indices)
+    cm_train = confusion_matrix(y_train, y_pred_train, labels=label_indices)
     # --- NEW LINES END HERE ---
 
     end = time.time()
@@ -1240,9 +1248,13 @@ def estimate_transform(df, ytarget="transpose_{'n_semitones': 12}", model="XGBoo
     print("F1-Score (macro):", f"{f1_macro_test:.4f}")
     transform_metrics[f'f1 weighted (test) ({ytarget})'] = f1_weighted_test
     transform_metrics[f'f1 weighted (train) ({ytarget})'] = f1_weighted_train
+    transform_metrics[f'evaluation status ({ytarget})'] = 'evaluated'
+    transform_metrics[f'class labels ({ytarget})'] = class_labels
+    transform_metrics[f'confusion matrix (test) ({ytarget})'] = cm_test.tolist()
+    transform_metrics[f'confusion matrix (train) ({ytarget})'] = cm_train.tolist()
     print("F1-Score (weighted):", f"{f1_weighted_test:.4f}")
 
-    print("Confusion Matrix:\n", cm)
+    print("Confusion Matrix:\n", cm_test)
     # --- NEW LINES END HERE ---
     #
     # Save all needed artifacts
